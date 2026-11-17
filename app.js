@@ -159,13 +159,17 @@ function profileView() {
   const m = state.me;
   return `<div class="topbar"><h2>My profile</h2></div>
   <div class="profile">
-    <div class="card">${photoOf(m)}<div class="body">
+    <div class="card">${photoOf(m, m.blur)}<div class="body">
       <h3>${esc(m.name)}</h3><p class="loc">Now in ${esc(m.location)}</p>
       <p class="meta">${esc(genderLabel(m.gender))}. Meeting: ${m.seeking.map(genderLabel).join(", ")}</p>
       ${m.bio ? `<p>${esc(m.bio)}</p>` : ""}
       <div class="tags">${(m.interests || []).map((i) => `<span>${esc(i)}</span>`).join("")}</div>
       <p class="hint" style="margin-top:14px">Your contact (${esc(m.contact)}) stays hidden from others until they unlock it.</p>
     </div></div>
+    <div class="box"><h3>Photo privacy</h3>
+      <p class="hint">${m.blur ? "Your photos are blurred. Others see them blurred until they unlock your contact." : "Your photos are visible to everyone browsing."}</p>
+      <button class="btn ${m.blur ? "sun" : "ghost"}" data-act="toggleblur">${m.blur ? "Show my photos" : "Blur my photos"}</button>
+    </div>
     <button class="btn" data-act="edit">Edit profile</button>
     <div class="box"><h3>Stay safe</h3><ul>
       <li>Meet in public places first.</li>
@@ -280,6 +284,7 @@ const actions = {
   start: () => { view = "signup"; step = 1; draftPhotos = []; },
   nav: (d) => { view = d.to; },
   edit: () => { view = "edit"; draftPhotos = (state.me.photos || []).slice(); },
+  toggleblur: () => { state.me.blur = !state.me.blur; save(); },
   unlock: (d) => { unlockId = d.id; },
   closeunlock: () => { unlockId = null; },
   confirmunlock: () => { if (!state.unlocked.includes(unlockId)) state.unlocked.push(unlockId); unlockId = null; save(); },
