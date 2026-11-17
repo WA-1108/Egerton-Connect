@@ -210,7 +210,7 @@ body.landing #app { max-width: none; padding-bottom: 0; background: var(--paper)
 .fc span { color: var(--muted); font-size: 0.85rem; }
 .fc-p1 { top: 6px; left: 4%; rotate: -4deg; }
 .fc-p2 { top: 100px; right: 2%; rotate: 3deg; animation-delay: -2s; }
-.fc-p5 { bottom: 20px; left: 10%; rotate: 2deg; animation-delay: -4s; }
+.fc-p7 { bottom: 20px; left: 10%; rotate: 2deg; animation-delay: -4s; }
 .fc-match { top: 205px; left: 34%; background: var(--sun); color: var(--forest); padding: 12px 20px; rotate: -3deg; font-size: 1.05rem; animation-delay: -1s; }
 
 .how { background: var(--paper); color: var(--ink); padding: 20px 22px 70px; }
@@ -246,3 +246,15 @@ body.landing #app { max-width: none; padding-bottom: 0; background: var(--paper)
   .reveal, .step { animation: none; opacity: 1; }
   .fc { animation: none; }
 }
+.card h3 { margin-bottom: 10px; }
+
+/* ===== Profile directory ===== */
+.cards { padding: 8px 20px; display: grid; gap: 18px; }
+.photo { display: block; width: 100%; height: 260px; object-fit: cover; }
+.loc { display: inline-block; background: var(--paper); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; font-size: 0.85rem; margin: 0 0 10px; }
+.lock { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--paper); border-radius: 12px; padding: 10px 12px; margin-top: 14px; font-weight: 600; letter-spacing: 0.04em; }
+.contact { display: block; margin-top: 14px; font-weight: 800; font-size: 1.15rem; color: var(--forest); }
+.thumbs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.thumbs .th { position: relative; }
+.thumbs img { width: 76px; height: 76px; object-fit: cover; border-radius: 12px; border: 2px solid var(--line); display: block; }
+.thumbs button { position: absolute; top: -8px; right: -8px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: var(--danger); color: var(--white); line-height: 1; }
