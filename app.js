@@ -6,19 +6,21 @@
 const KEY = "egertonConnect.v2";
 const GENDERS = [["woman", "Woman"], ["man", "Man"], ["nonbinary", "Non-binary"]];
 
+const ZONES = ["Egerton main campus", "Egerton area", "Njoro town", "Njoro, near the market", "Nakuru town", "Elsewhere nearby"];
+
 const PROFILES = [
-  { id: "p1", name: "Wanjiru", gender: "woman", loc: "Njoro town", bio: "Early riser, loves sunrise walks and a good chapati.", interests: ["Hiking", "Cooking", "Gospel music"], contact: "0700 000 001" },
-  { id: "p2", name: "Brian", gender: "man", loc: "Egerton main campus", bio: "Building small apps and losing at FIFA. Looking for good conversation.", interests: ["Coding", "Football", "Chess"], contact: "0700 000 002" },
-  { id: "p3", name: "Achieng", gender: "woman", loc: "Njoro, near the market", bio: "Cheerful and always up for a movie night.", interests: ["Movies", "Dancing", "Volunteering"], contact: "0700 000 003" },
-  { id: "p4", name: "Kevin", gender: "man", loc: "Nakuru town", bio: "Gym in the morning, busy at night. Serious about kind people.", interests: ["Gym", "Cars", "Afrobeats"], contact: "0700 000 004" },
-  { id: "p5", name: "Faith", gender: "woman", loc: "Egerton main campus", bio: "Still finding my way around. Show me the best food spots.", interests: ["Reading", "Poetry", "Food"], contact: "0700 000 005" },
-  { id: "p6", name: "Mwangi", gender: "man", loc: "Njoro town", bio: "Lab rat with a guitar. Free time is rare but real.", interests: ["Guitar", "Science", "Coffee"], contact: "0700 000 006" },
-  { id: "p7", name: "Njeri", gender: "woman", loc: "Nakuru town", bio: "Budget spreadsheets and bubble tea. Honest people only.", interests: ["Finance", "Travel", "Photography"], contact: "0700 000 007" },
-  { id: "p8", name: "Otieno", gender: "man", loc: "Egerton area", bio: "Tree planter and weekend footballer.", interests: ["Nature", "Football", "Photography"], contact: "0700 000 008" },
-  { id: "p9", name: "Sam", gender: "nonbinary", loc: "Njoro town", bio: "Podcasts, thrift finds and long talks about nothing.", interests: ["Podcasts", "Fashion", "Writing"], contact: "0700 000 009" },
-  { id: "p10", name: "Mercy", gender: "woman", loc: "Egerton main campus", bio: "I bake on weekends and share the results.", interests: ["Baking", "Netflix", "Running"], contact: "0700 000 010" },
-  { id: "p11", name: "Dennis", gender: "man", loc: "Njoro, near the market", bio: "Calm, likes quiet evenings and good music.", interests: ["Music", "Farming", "Cycling"], contact: "0700 000 011" },
-  { id: "p12", name: "Zawadi", gender: "nonbinary", loc: "Egerton area", bio: "Puzzles, board games and kind people. Say hi.", interests: ["Board games", "Puzzles", "Anime"], contact: "0700 000 012" },
+  { id: "p1", name: "Sunrise", gender: "woman", loc: "Njoro town", bio: "Early riser, loves sunrise walks and a good chapati.", interests: ["Hiking", "Cooking", "Gospel music"], contact: "0700 000 001" },
+  { id: "p2", name: "Pixel", gender: "man", loc: "Egerton main campus", bio: "Building small apps and losing at FIFA. Looking for good conversation.", interests: ["Coding", "Football", "Chess"], contact: "0700 000 002", blur: true },
+  { id: "p3", name: "Mara", gender: "woman", loc: "Njoro, near the market", bio: "Cheerful and always up for a movie night.", interests: ["Movies", "Dancing", "Volunteering"], contact: "0700 000 003" },
+  { id: "p4", name: "Kito", gender: "man", loc: "Nakuru town", bio: "Gym in the morning, busy at night. Serious about kind people.", interests: ["Gym", "Cars", "Afrobeats"], contact: "0700 000 004" },
+  { id: "p5", name: "Zuri", gender: "woman", loc: "Egerton main campus", bio: "Still finding my way around. Show me the best food spots.", interests: ["Reading", "Poetry", "Food"], contact: "0700 000 005", blur: true },
+  { id: "p6", name: "Maestro", gender: "man", loc: "Njoro town", bio: "Lab rat with a guitar. Free time is rare but real.", interests: ["Guitar", "Science", "Coffee"], contact: "0700 000 006" },
+  { id: "p7", name: "Nia", gender: "woman", loc: "Nakuru town", bio: "Budget spreadsheets and bubble tea. Honest people only.", interests: ["Finance", "Travel", "Photography"], contact: "0700 000 007" },
+  { id: "p8", name: "Greenthumb", gender: "man", loc: "Egerton area", bio: "Tree planter and weekend footballer.", interests: ["Nature", "Football", "Photography"], contact: "0700 000 008" },
+  { id: "p9", name: "Echo", gender: "nonbinary", loc: "Njoro town", bio: "Podcasts, thrift finds and long talks about nothing.", interests: ["Podcasts", "Fashion", "Writing"], contact: "0700 000 009", blur: true },
+  { id: "p10", name: "Cupcake", gender: "woman", loc: "Egerton main campus", bio: "I bake on weekends and share the results.", interests: ["Baking", "Netflix", "Running"], contact: "0700 000 010" },
+  { id: "p11", name: "Dusk", gender: "man", loc: "Njoro, near the market", bio: "Calm, likes quiet evenings and good music.", interests: ["Music", "Farming", "Cycling"], contact: "0700 000 011" },
+  { id: "p12", name: "Puzzle", gender: "nonbinary", loc: "Egerton area", bio: "Puzzles, board games and kind people. Say hi.", interests: ["Board games", "Puzzles", "Anime"], contact: "0700 000 012" },
 ];
 
 /* ---------- State ---------- */
@@ -45,7 +47,14 @@ const avatar = (p, cls) => `<div class="avatar ${cls || ""}" style="--h:${hue(p.
 const genderLabel = (g) => (GENDERS.find((x) => x[0] === g) || [g, g])[1];
 const mask = (c) => c.slice(0, 2) + " •• ••• •••";
 const tel = (c) => c.replace(/[^\d+]/g, "");
-const photoOf = (p) => (p.photos && p.photos[0] ? `<img class="photo" src="${esc(p.photos[0])}" alt="Photo of ${esc(p.name)}" />` : avatar(p));
+const photoOf = (p, blurred) => (p.photos && p.photos[0] ? `<img class="photo${blurred ? " blurred" : ""}" src="${esc(p.photos[0])}" alt="Photo of ${esc(p.name)}" />` : avatar(p));
+
+function svgAvatar(p) {
+  const h = hue(p.id);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${h} 55% 62%)"/><stop offset="1" stop-color="hsl(${(h + 50) % 360} 55% 35%)"/></linearGradient></defs><rect width="400" height="300" fill="url(#g)"/><circle cx="200" cy="120" r="52" fill="rgba(255,255,255,0.85)"/><path d="M80 300c0-72 54-112 120-112s120 40 120 112z" fill="rgba(255,255,255,0.85)"/></svg>`;
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+}
+PROFILES.forEach((p) => { p.photos = [svgAvatar(p)]; });
 
 /* ---------- Views ---------- */
 
@@ -97,20 +106,21 @@ function formView() {
   const editing = !!state.me;
   const seeking = me.seeking || [];
   const chip = (type, name, g, on) => `<label class="chip"><input type="${type}" name="${name}" value="${g[0]}" ${on ? "checked" : ""} /><span>${g[1]}</span></label>`;
-  const nameF = `<div class="field"><label for="name">What should we call you?</label><input id="name" name="name" type="text" maxlength="30" autocomplete="given-name" placeholder="First name or nickname" value="${esc(me.name || "")}" /></div>`;
+  const nameF = `<div class="field"><label for="name">Choose a nickname</label><input id="name" name="name" type="text" maxlength="30" autocomplete="off" placeholder="e.g. Sunrise" value="${esc(me.name || "")}" /><div class="hint">Shown to everyone, so please do not use your real name.</div></div>`;
   const genderF = `<div class="field"><fieldset><legend>I am</legend><div class="chips">${GENDERS.map((g) => chip("radio", "gender", g, me.gender === g[0])).join("")}</div></fieldset></div>`;
   const seekF = `<div class="field"><fieldset><legend>I want to meet</legend><div class="chips">${GENDERS.map((g) => chip("checkbox", "seeking", g, seeking.includes(g[0]))).join("")}</div><div class="hint">Pick one or more.</div></fieldset></div>`;
-  const locF = `<div class="field"><label for="location">Current location</label><input id="location" name="location" type="text" maxlength="60" placeholder="e.g. Njoro town" value="${esc(me.location || "")}" /><div class="hint">Use a general area such as a town or neighbourhood, never your exact address.</div></div>`;
+  const locF = `<div class="field"><label for="location">Current area</label><select id="location" name="location"><option value="">Choose an area</option>${ZONES.map((z) => `<option ${me.location === z ? "selected" : ""}>${z}</option>`).join("")}</select><div class="hint">A general area only, so nobody can find your exact spot.</div></div>`;
   const bioF = `<div class="field"><label for="bio">About me <span class="hint">(optional)</span></label><textarea id="bio" name="bio" maxlength="200" placeholder="A line or two about you">${esc(me.bio || "")}</textarea></div>`;
   const intF = `<div class="field"><label for="interests">Interests <span class="hint">(optional)</span></label><input id="interests" name="interests" type="text" placeholder="Football, Movies, Coding" value="${esc((me.interests || []).join(", "))}" /><div class="hint">Separate with commas. Up to 4.</div></div>`;
   const photoF = `<div class="field"><label for="photos">Photos <span class="hint">(optional, up to 3)</span></label><input id="photos" type="file" accept="image/*" multiple /><div class="thumbs" id="thumbs">${thumbsHtml()}</div></div>`;
   const contactF = `<div class="field"><label for="contact">Phone or WhatsApp number</label><input id="contact" name="contact" type="tel" maxlength="20" placeholder="07XX XXX XXX" value="${esc(me.contact || "")}" /><div class="hint">Hidden from everyone until they unlock it.</div></div>`;
   const consentF = `<label class="check"><input type="checkbox" name="consent" /> <span>I am 18 or older and I will treat people with respect.</span></label>`;
+  const blurF = `<label class="check"><input type="checkbox" name="blur" ${me.blur ? "checked" : ""} /> <span>Blur my photos until someone unlocks my contact.</span></label>`;
   const errBox = `<div class="error" id="formError" role="alert" hidden></div>`;
 
   if (editing) {
     return `<div class="topbar"><h2>Edit profile</h2></div>
-    <form class="form" data-form="profile" novalidate>${errBox}${nameF}${genderF}${seekF}${locF}${bioF}${intF}${photoF}${contactF}
+    <form class="form" data-form="profile" novalidate>${errBox}${nameF}${genderF}${seekF}${locF}${bioF}${intF}${photoF}${blurF}${contactF}
       <button class="btn" type="submit">Save changes</button>
       <button class="btn ghost" type="button" data-act="nav" data-to="profile">Cancel</button></form>`;
   }
@@ -119,7 +129,7 @@ function formView() {
   <form class="form" data-form="profile" novalidate>${errBox}
     <section class="step" data-step="1"><h3 class="step-title">First, the basics</h3>${nameF}${genderF}${seekF}</section>
     <section class="step" data-step="2" hidden><h3 class="step-title">About you</h3>${locF}${bioF}${intF}</section>
-    <section class="step" data-step="3" hidden><h3 class="step-title">Photos and contact</h3>${photoF}${contactF}${consentF}</section>
+    <section class="step" data-step="3" hidden><h3 class="step-title">Photos and contact</h3>${photoF}${blurF}${contactF}${consentF}</section>
     <div class="step-nav">
       <button class="btn ghost" type="button" data-act="prev">Back</button>
       <button class="btn" type="button" id="nextBtn" data-act="next">Next</button>
@@ -133,8 +143,8 @@ function cardHtml(p) {
   const contact = open
     ? `<a class="contact" href="tel:${esc(tel(p.contact))}">${esc(p.contact)}</a>`
     : `<div class="lock"><span>${esc(mask(p.contact))}</span><button class="btn small sun" data-act="unlock" data-id="${p.id}">Unlock contact</button></div>`;
-  return `<article class="card">${photoOf(p)}<div class="body">
-    <h3>${esc(p.name)}</h3><p class="loc">Now in ${esc(p.loc)}</p>
+  return `<article class="card">${photoOf(p, p.blur && !open)}<div class="body">
+    <h3>${esc(p.name)}</h3><p class="loc">Now in ${esc(p.loc)}</p>${p.blur && !open ? `<p class="hint">Photo is blurred until you unlock contact.</p>` : ""}
     ${p.bio ? `<p>${esc(p.bio)}</p>` : ""}
     <div class="tags">${(p.interests || []).map((i) => `<span>${esc(i)}</span>`).join("")}</div>${contact}</div></article>`;
 }
@@ -185,10 +195,10 @@ function unlockModal() {
 
 function validate(data, editing) {
   const digits = (data.get("contact") || "").toString().replace(/\D/g, "");
-  if (!(data.get("name") || "").toString().trim()) return ["Enter your name.", 1];
+  if (!(data.get("name") || "").toString().trim()) return ["Choose a nickname.", 1];
   if (!data.get("gender")) return ["Choose who you are.", 1];
   if (!data.getAll("seeking").length) return ["Choose who you want to meet.", 1];
-  if (!(data.get("location") || "").toString().trim()) return ["Enter your current location.", 2];
+  if (!(data.get("location") || "").toString().trim()) return ["Choose your current area.", 2];
   if (digits.length < 9) return ["Enter a valid phone number.", 3];
   if (!editing && !data.get("consent")) return ["Please confirm you are 18 or older.", 3];
   return null;
@@ -311,6 +321,7 @@ app.addEventListener("submit", (e) => {
     interests: (data.get("interests") || "").toString().split(",").map((s) => s.trim()).filter(Boolean).slice(0, 4),
     contact: data.get("contact").toString().trim(),
     photos: draftPhotos.slice(),
+    blur: !!data.get("blur"),
   };
   save();
   view = editing ? "profile" : "browse";
