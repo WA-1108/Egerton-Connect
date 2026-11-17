@@ -59,50 +59,77 @@ function candidates() {
 /* ---------- Views ---------- */
 
 function welcomeView() {
+  const mini = (id, line) => { const p = byId(id); return `<div class="fc fc-${id}">${avatar(p, "sm")}<div><strong>${esc(p.name)}, ${p.age}</strong><span>${esc(line)}</span></div></div>`; };
   return `
-  <section class="welcome">
-    <div class="brand">Egerton Connect</div>
-    <div class="sun" aria-hidden="true"></div>
-    <h1>Meet people at Egerton.</h1>
-    <p class="lead">Make a profile, say who you want to meet, and chat when you both say yes.</p>
-    <button class="btn sun" data-act="start">Create my profile</button>
-    <p class="fine">For students aged 18 and over. This is a demo: the profiles you see are samples.</p>
-  </section>`;
+  <main class="landing-page">
+    <header class="l-top"><span class="brand">Egerton Connect</span><button class="btn sun small" data-act="start">Join free</button></header>
+    <section class="hero">
+      <div class="hero-in">
+        <div class="hero-copy">
+          <span class="pill reveal" style="--d:0s">For Egerton students, 18+</span>
+          <h1 class="reveal" style="--d:.1s">Your next favourite person is <em>on campus.</em></h1>
+          <p class="lead reveal" style="--d:.2s">Make a profile in under a minute. Swipe, match and chat with students from your own university.</p>
+          <button class="btn sun big reveal" style="--d:.3s" data-act="start">Create my profile</button>
+          <p class="fine reveal" style="--d:.4s">Free to join. Just 3 quick steps.</p>
+        </div>
+        <div class="hero-art reveal" style="--d:.35s" aria-hidden="true">
+          ${mini("p1", "BSc Agribusiness")}
+          ${mini("p2", "BSc Computer Science")}
+          <div class="fc fc-match"><strong>It's a match!</strong></div>
+          ${mini("p5", "BEd Arts")}
+        </div>
+      </div>
+    </section>
+    <section class="how">
+      <h2>How it works</h2>
+      <div class="steps3">
+        <div class="how-card"><span class="num">1</span><h3>Create your profile</h3><p>Your name, course and who you'd like to meet. It takes a minute.</p></div>
+        <div class="how-card"><span class="num">2</span><h3>Swipe</h3><p>Browse students and tap Like on the people you'd want to talk to.</p></div>
+        <div class="how-card"><span class="num">3</span><h3>Match and chat</h3><p>When you both say yes, you can start a conversation.</p></div>
+      </div>
+    </section>
+    <section class="final">
+      <h2>Ready to meet someone?</h2>
+      <button class="btn sun big" data-act="start">Create my profile</button>
+      <p class="fine">Early preview: sample profiles are shown until more students join.</p>
+    </section>
+    <div class="sticky-cta"><button class="btn sun" data-act="start">Create my profile</button></div>
+  </main>`;
 }
 
 function formView() {
   const me = state.me || {};
   const editing = !!state.me;
   const seeking = me.seeking || [];
-  return `
-  <div class="topbar"><h2>${editing ? "Edit profile" : "Create profile"}</h2></div>
-  <form class="form" data-form="profile" novalidate>
-    ${formError ? `<div class="error" role="alert">${esc(formError)}</div>` : ""}
-    <div class="field"><label for="name">First name</label>
-      <input id="name" name="name" type="text" maxlength="30" value="${esc(me.name || "")}" required /></div>
-    <div class="row">
-      <div class="field"><label for="age">Age</label>
-        <input id="age" name="age" type="number" min="18" max="60" value="${esc(me.age || "")}" required />
-        <div class="hint">Must be 18 or over.</div></div>
-      <div class="field"><label for="year">Year of study</label>
-        <select id="year" name="year">${[1, 2, 3, 4, 5, 6].map((y) => `<option value="${y}" ${me.year == y ? "selected" : ""}>Year ${y}</option>`).join("")}</select></div>
+  const chip = (type, name, g, on) => `<label class="chip"><input type="${type}" name="${name}" value="${g[0]}" ${on ? "checked" : ""} /><span>${g[1]}</span></label>`;
+  const nameF = `<div class="field"><label for="name">What should we call you?</label><input id="name" name="name" type="text" maxlength="30" autocomplete="given-name" placeholder="First name" value="${esc(me.name || "")}" /></div>`;
+  const ageF = `<div class="field"><label for="age">Age</label><input id="age" name="age" type="number" min="18" max="60" value="${esc(me.age || "")}" /><div class="hint">You must be 18 or over.</div></div>`;
+  const genderF = `<div class="field"><fieldset><legend>I am</legend><div class="chips">${GENDERS.map((g) => chip("radio", "gender", g, me.gender === g[0])).join("")}</div></fieldset></div>`;
+  const courseF = `<div class="field"><label for="course">Course</label><input id="course" name="course" type="text" maxlength="60" placeholder="e.g. BSc Computer Science" value="${esc(me.course || "")}" /></div>`;
+  const yearF = `<div class="field"><label for="year">Year of study</label><select id="year" name="year">${[1, 2, 3, 4, 5, 6].map((y) => `<option value="${y}" ${me.year == y ? "selected" : ""}>Year ${y}</option>`).join("")}</select></div>`;
+  const seekF = `<div class="field"><fieldset><legend>I want to meet</legend><div class="chips">${GENDERS.map((g) => chip("checkbox", "seeking", g, seeking.includes(g[0]))).join("")}</div><div class="hint">Pick one or more.</div></fieldset></div>`;
+  const bioF = `<div class="field"><label for="bio">About me <span class="hint">(optional)</span></label><textarea id="bio" name="bio" maxlength="160" placeholder="A line or two about you">${esc(me.bio || "")}</textarea></div>`;
+  const intF = `<div class="field"><label for="interests">Interests <span class="hint">(optional)</span></label><input id="interests" name="interests" type="text" placeholder="Football, Movies, Coding" value="${esc((me.interests || []).join(", "))}" /><div class="hint">Separate with commas. Up to 4.</div></div>`;
+  const consentF = `<label class="check"><input type="checkbox" name="consent" /> <span>I am 18 or older and I will treat people with respect.</span></label>`;
+  const errBox = `<div class="error" id="formError" role="alert" hidden></div>`;
+
+  if (editing) {
+    return `<div class="topbar"><h2>Edit profile</h2></div>
+    <form class="form" data-form="profile" novalidate>${errBox}${nameF}<div class="row">${ageF}${yearF}</div>${courseF}${genderF}${seekF}${bioF}${intF}
+      <button class="btn" type="submit">Save changes</button>
+      <button class="btn ghost" type="button" data-act="nav" data-to="profile">Cancel</button></form>`;
+  }
+  return `<div class="topbar"><h2>Create your profile</h2><span class="tag" id="stepLabel">Step 1 of 3</span></div>
+  <div class="progress" aria-hidden="true"><div id="bar"></div></div>
+  <form class="form" data-form="profile" novalidate>${errBox}
+    <section class="step" data-step="1"><h3 class="step-title">First, the basics</h3>${nameF}${ageF}${genderF}</section>
+    <section class="step" data-step="2" hidden><h3 class="step-title">Your campus life</h3>${courseF}${yearF}${seekF}</section>
+    <section class="step" data-step="3" hidden><h3 class="step-title">Make it yours</h3>${bioF}${intF}${consentF}</section>
+    <div class="step-nav">
+      <button class="btn ghost" type="button" data-act="prev">Back</button>
+      <button class="btn" type="button" id="nextBtn" data-act="next">Next</button>
+      <button class="btn sun" type="submit" id="doneBtn" hidden>Start meeting people</button>
     </div>
-    <div class="field"><label for="course">Course</label>
-      <input id="course" name="course" type="text" maxlength="60" placeholder="e.g. BSc Computer Science" value="${esc(me.course || "")}" required /></div>
-    <div class="field"><fieldset><legend>I am</legend><div class="chips">
-      ${GENDERS.map((g) => `<label class="chip"><input type="radio" name="gender" value="${g[0]}" ${me.gender === g[0] ? "checked" : ""} /><span>${g[1]}</span></label>`).join("")}
-    </div></fieldset></div>
-    <div class="field"><fieldset><legend>I want to meet</legend><div class="chips">
-      ${GENDERS.map((g) => `<label class="chip"><input type="checkbox" name="seeking" value="${g[0]}" ${seeking.includes(g[0]) ? "checked" : ""} /><span>${g[1]}</span></label>`).join("")}
-    </div><div class="hint">Pick one or more.</div></fieldset></div>
-    <div class="field"><label for="bio">About me</label>
-      <textarea id="bio" name="bio" maxlength="160" placeholder="A line or two about you">${esc(me.bio || "")}</textarea></div>
-    <div class="field"><label for="interests">Interests</label>
-      <input id="interests" name="interests" type="text" placeholder="Football, Movies, Coding" value="${esc((me.interests || []).join(", "))}" />
-      <div class="hint">Separate with commas. Up to 4.</div></div>
-    ${editing ? "" : `<label class="check"><input type="checkbox" name="consent" /> <span>I am 18 or older and I will treat people with respect.</span></label>`}
-    <button class="btn" type="submit">${editing ? "Save changes" : "Start meeting people"}</button>
-    ${editing ? `<button class="btn ghost" type="button" data-act="nav" data-to="profile">Cancel</button>` : ""}
   </form>`;
 }
 
@@ -200,6 +227,52 @@ function matchModal() {
     <button class="btn ghost" data-act="closematch">Keep swiping</button></div></div>`;
 }
 
+/* ---------- Sign-up steps ---------- */
+
+let step = 1;
+const STEPS = 3;
+
+function validate(data, editing) {
+  const age = parseInt(data.get("age"), 10);
+  if (!(data.get("name") || "").toString().trim()) return ["Enter your first name.", 1];
+  if (!age || age < 18) return ["You must be 18 or older to use Egerton Connect.", 1];
+  if (age > 60) return ["Enter a valid age.", 1];
+  if (!data.get("gender")) return ["Choose who you are.", 1];
+  if (!(data.get("course") || "").toString().trim()) return ["Enter your course.", 2];
+  if (!data.getAll("seeking").length) return ["Choose who you want to meet.", 2];
+  if (!editing && !data.get("consent")) return ["Please confirm you are 18 or older.", 3];
+  return null;
+}
+
+function showError(msg) {
+  const box = document.getElementById("formError");
+  if (box) { box.textContent = msg; box.hidden = false; }
+}
+
+function showStep(n) {
+  step = n;
+  const next = document.getElementById("nextBtn");
+  if (!next) return;
+  document.querySelectorAll(".step").forEach((el) => { el.hidden = Number(el.dataset.step) !== n; });
+  document.getElementById("bar").style.width = (n / STEPS) * 100 + "%";
+  document.getElementById("stepLabel").textContent = "Step " + n + " of " + STEPS;
+  next.hidden = n === STEPS;
+  document.getElementById("doneBtn").hidden = n !== STEPS;
+  const box = document.getElementById("formError");
+  if (box) box.hidden = true;
+}
+
+function stepNav(dir) {
+  if (dir === "prev") {
+    if (step === 1) { view = "welcome"; render(); } else showStep(step - 1);
+    return;
+  }
+  const data = new FormData(document.querySelector('form[data-form="profile"]'));
+  const err = validate(data, false);
+  if (err && err[1] <= step) { showError(err[0]); return; }
+  showStep(step + 1);
+}
+
 /* ---------- Render ---------- */
 
 function render() {
@@ -212,6 +285,8 @@ function render() {
   else if (view === "profile") html = profileView() + navView();
   else if (view === "chat") html = chatView();
   app.innerHTML = html + matchModal();
+  document.body.classList.toggle("landing", view === "welcome");
+  if (view === "signup") showStep(1);
   window.scrollTo(0, 0);
   if (view === "chat") {
     const box = document.getElementById("msgs");
@@ -262,7 +337,7 @@ function sendMessage(text) {
 }
 
 const actions = {
-  start: () => { view = "signup"; formError = ""; },
+  start: () => { view = "signup"; formError = ""; step = 1; },
   nav: (d) => { view = d.to; },
   edit: () => { view = "edit"; formError = ""; },
   like: (d) => swipe(d.id, true),
@@ -282,6 +357,7 @@ const actions = {
 app.addEventListener("click", (e) => {
   const el = e.target.closest("[data-act]");
   if (!el) return;
+  if (el.dataset.act === "next" || el.dataset.act === "prev") { stepNav(el.dataset.act); return; }
   const fn = actions[el.dataset.act];
   if (!fn) return;
   const result = fn(el.dataset);
@@ -303,23 +379,15 @@ app.addEventListener("submit", (e) => {
   }
 
   if (type === "profile") {
-    const name = (data.get("name") || "").toString().trim();
+    const editing = !!state.me;
+    if (!editing && step < STEPS) { stepNav("next"); return; }
+    const err = validate(data, editing);
+    if (err) { if (!editing) showStep(err[1]); showError(err[0]); return; }
+    const name = data.get("name").toString().trim();
     const age = parseInt(data.get("age"), 10);
-    const course = (data.get("course") || "").toString().trim();
+    const course = data.get("course").toString().trim();
     const gender = data.get("gender");
     const seeking = data.getAll("seeking");
-    const editing = !!state.me;
-
-    if (!name) formError = "Enter your first name.";
-    else if (!age || age < 18) formError = "You must be 18 or older to use Egerton Connect.";
-    else if (age > 60) formError = "Enter a valid age.";
-    else if (!course) formError = "Enter your course.";
-    else if (!gender) formError = "Choose who you are.";
-    else if (!seeking.length) formError = "Choose who you want to meet.";
-    else if (!editing && !data.get("consent")) formError = "Please confirm you are 18 or older.";
-    else formError = "";
-
-    if (formError) { render(); return; }
 
     state.me = {
       name, age, course, gender, seeking,
