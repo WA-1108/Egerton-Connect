@@ -56,6 +56,11 @@ let interestFilter = "all";
 const SAVEKEY = "egertonConnect.saved";
 let savedIds = new Set();
 try { savedIds = new Set(JSON.parse(localStorage.getItem(SAVEKEY)) || []); } catch (e) { /* ignore */ }
+const HKEY = "egertonConnect.hidden";
+const loadHidden = () => { try { return new Set(JSON.parse(localStorage.getItem(HKEY)) || []); } catch (e) { return new Set(); } };
+let hiddenIds = loadHidden();
+let blockedList = [];
+let reportId = null;
 function toggleSave(id) {
   if (savedIds.has(id)) savedIds.delete(id); else savedIds.add(id);
   try { localStorage.setItem(SAVEKEY, JSON.stringify([...savedIds])); } catch (e) { /* ignore */ }
@@ -133,6 +138,8 @@ async function loadPeople() {
   people = (data || []).map((r) => ({ id: r.id, name: r.nickname, gender: r.gender, loc: r.area, bio: r.bio || "", interests: r.interests || [], blur: r.blur_photos, photos: r.photos || [] }));
   const u = await sb.from("unlocks").select("profile_id");
   unlockedIds = new Set((u.data || []).map((x) => x.profile_id));
+  const bl = await sb.from("blocks").select("blocked_id,blocked_name");
+  blockedList = (bl.data || []).map((x) => ({ id: x.blocked_id, name: x.blocked_name }));
   for (const id of unlockedIds) { if (!revealed[id]) revealed[id] = await getContact(id); }
   await signPeople(people);
 }
@@ -319,11 +326,11 @@ function cardHtml(p, i) {
     </div>
     <div class="body">${p.blur && !open ? `<p class="hint">Photo is blurred until you unlock contact.</p>` : ""}
       ${p.bio ? `<p>${esc(p.bio)}</p>` : ""}
-      <div class="tags">${(p.interests || []).map((x) => `<span>${esc(x)}</span>`).join("")}</div>${contact}</div></article>`;
+      <div class="tags">${(p.interests || []).map((x) => `<span>${esc(x)}</span>`).join("")}</div>${contact}<button class="reportlink" data-act="report" data-id="${esc(p.id)}">Report or block</button></div></article>`;
 }
 
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; };
-const baseList = () => (people.length ? people : PROFILES.filter((p) => me.seeking.includes(p.gender)));
+const baseList = () => (people.length ? people : PROFILES.filter((p) => me.seeking.includes(p.gender))).filter((p) => !hiddenIds.has(p.id));
 
 function appHead() {
   const tab = (to, label) => `<button data-act="nav" data-to="${to}" ${view === to ? 'aria-current="page"' : ""}>${label}</button>`;
@@ -386,8 +393,9 @@ function browseView() {
 }
 
 function savedView() {
-  const list = people.concat(PROFILES).filter((p) => savedIds.has(p.id));
+  const list = people.concat(PROFILES).filter((p) => savedIds.has(p.id) && !hiddenIds.has(p.id));
   return `${appHead()}
+    ${noticeHtml()}
     <section class="b-hero slim"><h2>Saved</h2><p>Profiles you have kept for later.</p></section>
     ${list.length ? `<div class="cards">${list.map(cardHtml).join("")}</div>` : `<div class="empty"><h3>Nothing saved yet</h3><p>Tap the heart on a profile to keep it here.</p><button class="btn ghost" data-act="nav" data-to="browse">Browse profiles</button></div>`}
     ${footerHtml()}`;
@@ -409,6 +417,7 @@ function profileView() {
     </div></div>
     ${me.photos.length ? `<div class="box"><h3>Photo privacy</h3><p class="hint">${me.blur ? "Your photos are blurred. Others see them blurred until they unlock your contact." : "Your photos are visible to everyone browsing."}</p><button class="btn ${me.blur ? "sun" : "ghost"}" data-act="toggleblur">${me.blur ? "Show my photos" : "Blur my photos"}</button></div>` : ""}
     <button class="btn" data-act="edit">Edit profile</button>
+    ${blockedList.length ? `<div class="box"><h3>Blocked people</h3>${blockedList.map((b) => `<div class="blk"><span>${esc(b.name)}</span><button class="btn small ghost" data-act="unblock" data-id="${esc(b.id)}">Unblock</button></div>`).join("")}</div>` : ""}
     <button class="btn ghost" data-act="logout">Log out</button>
     <button class="btn danger" data-act="delete">Delete my profile</button>
   </div>`;
@@ -428,6 +437,57 @@ function unlockModal() {
     <p>In the live version, contact access will be a paid feature. Payments are not switched on in this preview, so you can unlock for free.</p>
     <button class="btn sun" data-act="confirmunlock">Unlock (demo)</button>
     <button class="btn ghost" data-act="closeunlock">Not now</button></div></div>`;
+}
+
+/* ---------- Report and block ---------- */
+
+const findPerson = (id) => people.find((x) => x.id === id) || byId(id);
+
+function hide(id) {
+  hiddenIds.add(id);
+  if (byId(id)) { try { localStorage.setItem(HKEY, JSON.stringify([...hiddenIds].filter((x) => byId(x)))); } catch (e) { /* ignore */ } }
+}
+
+function reportModal() {
+  if (!reportId) return "";
+  const p = findPerson(reportId);
+  if (!p) return "";
+  const reasons = ["Fake profile or scam", "Harassment or abuse", "Looks under 18", "Inappropriate photos", "Asking for money", "Something else"];
+  return `<div class="overlay" role="dialog" aria-modal="true" aria-label="Report or block"><form class="modal report" data-form="report">
+    <h2>Report ${esc(p.name)}</h2>
+    <p class="hint">Tell us what is wrong. Reports are private.</p>
+    <div class="error" id="reportError" role="alert" hidden></div>
+    <fieldset class="reasons">${reasons.map((r) => `<label class="check"><input type="radio" name="reason" value="${esc(r)}" /> <span>${esc(r)}</span></label>`).join("")}</fieldset>
+    <textarea name="details" maxlength="500" placeholder="Anything else we should know? (optional)"></textarea>
+    <label class="check"><input type="checkbox" name="alsoblock" checked /> <span>Also block ${esc(p.name)}</span></label>
+    <button class="btn sun" type="submit">Send</button>
+    <button class="btn ghost" type="button" data-act="closereport">Cancel</button></form></div>`;
+}
+
+async function sendReport(data) {
+  const err = document.getElementById("reportError");
+  const fail = (m) => { err.textContent = m; err.hidden = false; };
+  const reason = data.get("reason");
+  if (!reason) { fail("Choose a reason."); return; }
+  if (busy) return;
+  busy = true;
+  try {
+    const p = findPerson(reportId);
+    const block = !!data.get("alsoblock");
+    if (p && !p.sample) {
+      const r = await sb.from("reports").insert({ reporter_id: user.id, reported_id: p.id, reason: reason.toString(), details: (data.get("details") || "").toString().trim().slice(0, 500) });
+      if (r.error) { fail("Could not send: " + r.error.message); return; }
+      if (block) {
+        const b = await sb.from("blocks").insert({ blocker_id: user.id, blocked_id: p.id, blocked_name: p.name });
+        if (b.error && b.error.code !== "23505") { fail("Could not block: " + b.error.message); return; }
+        if (!blockedList.some((x) => x.id === p.id)) blockedList.push({ id: p.id, name: p.name });
+      }
+    }
+    if (block && p) hide(p.id);
+    reportId = null;
+    notice = block ? "Thank you. We will review your report, and you will no longer see this profile." : "Thank you. We will review your report.";
+    render();
+  } finally { busy = false; }
 }
 
 /* ---------- Sign-up steps ---------- */
@@ -513,7 +573,7 @@ function render(keep) {
   else if (view === "browse") html = browseView() + navView();
   else if (view === "saved") html = savedView() + navView();
   else if (view === "profile") html = profileView() + navView();
-  app.innerHTML = html + unlockModal();
+  app.innerHTML = html + unlockModal() + reportModal();
   document.body.classList.toggle("landing", view === "welcome");
   if (view === "create") showStep(1);
   if (!keep) window.scrollTo(0, 0);
@@ -527,6 +587,14 @@ const actions = {
     photoList = [];
     if (user) view = me ? "browse" : "create";
     else { authMode = "signup"; view = "auth"; }
+  },
+  report: (d) => { reportId = d.id; },
+  closereport: () => { reportId = null; },
+  unblock: async (d) => {
+    const { error } = await sb.from("blocks").delete().eq("blocker_id", user.id).eq("blocked_id", d.id);
+    if (error) { notice = "Could not unblock: " + error.message; return; }
+    hiddenIds.delete(d.id);
+    await loadPeople();
   },
   area: (d) => { areaFilter = d.z; },
   interest: (d) => { interestFilter = d.i; },
@@ -559,7 +627,7 @@ const actions = {
   },
   logout: async () => {
     await sb.auth.signOut();
-    user = null; me = null; people = []; unlockedIds = new Set(); revealed = {};
+    user = null; me = null; people = []; unlockedIds = new Set(); revealed = {}; hiddenIds = loadHidden(); blockedList = [];
     view = "welcome";
   },
   delete: async () => {
@@ -568,7 +636,7 @@ const actions = {
     const { error } = await sb.from("profiles").delete().eq("id", user.id);
     if (error) { notice = "Could not delete: " + error.message; return; }
     await sb.auth.signOut();
-    user = null; me = null; people = []; unlockedIds = new Set(); revealed = {};
+    user = null; me = null; people = []; unlockedIds = new Set(); revealed = {}; hiddenIds = loadHidden(); blockedList = [];
     view = "welcome";
   },
 };
@@ -611,6 +679,7 @@ app.addEventListener("submit", async (e) => {
   const form = e.target;
   const data = new FormData(form);
   if (form.dataset.form === "auth") { await doAuth(data); return; }
+  if (form.dataset.form === "report") { await sendReport(data); return; }
   const editing = view === "edit";
   if (!editing && step < STEPS) { stepNav("next"); return; }
   const err = validate(data, editing);
