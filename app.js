@@ -1,13 +1,19 @@
-/* Egerton Connect - demo in plain JavaScript.
-   Profiles show photos, details and current location. Contact numbers are locked until unlocked.
-   Data is saved in this browser only, and the people you see are samples.
-   A real launch needs a backend (for example Supabase) for accounts, photos and payments. */
+/* Egerton Connect - real accounts with Supabase.
+   The publishable key below is meant to be public. Never put a secret or service_role key in this file. */
 
-const KEY = "egertonConnect.v2";
+const SUPABASE_URL = "https://hfezzmtvngspvvmnpswy.supabase.co";
+const SUPABASE_KEY = "sb_publishable_o0HidjHmVXfXzy7cPLq5Hw_cyAagOWf";
+
+if (!window.supabase) {
+  document.getElementById("app").innerHTML = '<p style="padding:24px">Could not load the login service. Check your connection and refresh the page.</p>';
+  throw new Error("Supabase library missing");
+}
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
 const GENDERS = [["woman", "Woman"], ["man", "Man"], ["nonbinary", "Non-binary"]];
-
 const ZONES = ["Egerton main campus", "Egerton area", "Njoro town", "Njoro, near the market", "Nakuru town", "Elsewhere nearby"];
 
+/* Sample profiles, shown only until real people join */
 const PROFILES = [
   { id: "p1", name: "Sunrise", gender: "woman", loc: "Njoro town", bio: "Early riser, loves sunrise walks and a good chapati.", interests: ["Hiking", "Cooking", "Gospel music"], contact: "0700 000 001" },
   { id: "p2", name: "Pixel", gender: "man", loc: "Egerton main campus", bio: "Building small apps and losing at FIFA. Looking for good conversation.", interests: ["Coding", "Football", "Chess"], contact: "0700 000 002", blur: true },
@@ -25,27 +31,30 @@ const PROFILES = [
 
 /* ---------- State ---------- */
 
-function fresh() { return { me: null, unlocked: [] }; }
-function load() {
-  try { const s = JSON.parse(localStorage.getItem(KEY)); return s && s.me ? Object.assign(fresh(), s) : fresh(); }
-  catch (e) { return fresh(); }
-}
-function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* storage full or blocked */ } }
+const SKEY = "egertonConnect.sampleUnlocks";
+let sampleUnlocked = [];
+try { sampleUnlocked = JSON.parse(localStorage.getItem(SKEY)) || []; } catch (e) { /* ignore */ }
 
-let state = load();
-let view = state.me ? "browse" : "welcome";
+let user = null;
+let me = null;
+let people = [];
+let unlockedIds = new Set();
+let revealed = {};
+let view = "welcome";
+let authMode = "signup";
 let step = 1;
 const STEPS = 3;
-let draftPhotos = [];
 let unlockId = null;
+let notice = "";
+let busy = false;
 
 const app = document.getElementById("app");
 const byId = (id) => PROFILES.find((p) => p.id === id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const hue = (id) => (id.split("").reduce((a, c) => a + c.charCodeAt(0) * 17, 0) % 360);
-const avatar = (p, cls) => `<div class="avatar ${cls || ""}" style="--h:${hue(p.id || p.name)}" aria-hidden="true">${esc(p.name[0])}</div>`;
+const avatar = (p, cls) => `<div class="avatar ${cls || ""}" style="--h:${hue(String(p.id || p.name))}" aria-hidden="true">${esc(p.name[0])}</div>`;
 const genderLabel = (g) => (GENDERS.find((x) => x[0] === g) || [g, g])[1];
-const mask = (c) => c.slice(0, 2) + " •• ••• •••";
+const mask = (c) => (c ? c.slice(0, 2) : "07") + " •• ••• •••";
 const tel = (c) => c.replace(/[^\d+]/g, "");
 const photoOf = (p, blurred) => (p.photos && p.photos[0] ? `<img class="photo${blurred ? " blurred" : ""}" src="${esc(p.photos[0])}" alt="Photo of ${esc(p.name)}" />` : avatar(p));
 
@@ -54,21 +63,105 @@ function svgAvatar(p) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${h} 55% 62%)"/><stop offset="1" stop-color="hsl(${(h + 50) % 360} 55% 35%)"/></linearGradient></defs><rect width="400" height="300" fill="url(#g)"/><circle cx="200" cy="120" r="52" fill="rgba(255,255,255,0.85)"/><path d="M80 300c0-72 54-112 120-112s120 40 120 112z" fill="rgba(255,255,255,0.85)"/></svg>`;
   return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
 }
-PROFILES.forEach((p) => { p.photos = [svgAvatar(p)]; });
+PROFILES.forEach((p) => { p.photos = [svgAvatar(p)]; p.sample = true; });
+
+function noticeHtml() {
+  const n = notice;
+  notice = "";
+  return n ? `<div class="notice" role="status">${esc(n)}</div>` : "";
+}
+
+/* ---------- Data ---------- */
+
+async function loadMe() {
+  const { data: p } = await sb.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  if (!p) { me = null; return; }
+  const { data: c } = await sb.from("contacts").select("phone").eq("profile_id", user.id).maybeSingle();
+  me = { id: p.id, name: p.nickname, gender: p.gender, seeking: p.seeking, loc: p.area, bio: p.bio || "", interests: p.interests || [], contact: c ? c.phone : "" };
+}
+
+async function getContact(id) {
+  const { data } = await sb.rpc("get_contact", { target: id });
+  return data || "";
+}
+
+async function loadPeople() {
+  const { data } = await sb.from("profiles").select("id,nickname,gender,area,bio,interests,blur_photos").neq("id", user.id).in("gender", me.seeking);
+  people = (data || []).map((r) => ({ id: r.id, name: r.nickname, gender: r.gender, loc: r.area, bio: r.bio || "", interests: r.interests || [], blur: r.blur_photos }));
+  const u = await sb.from("unlocks").select("profile_id");
+  unlockedIds = new Set((u.data || []).map((x) => x.profile_id));
+  for (const id of unlockedIds) { if (!revealed[id]) revealed[id] = await getContact(id); }
+}
+
+async function afterLogin() {
+  await loadMe();
+  if (me) { await loadPeople(); view = "browse"; } else { view = "create"; }
+  step = 1;
+}
+
+async function doAuth(data) {
+  const email = (data.get("email") || "").toString().trim();
+  const password = (data.get("password") || "").toString();
+  if (!email || password.length < 8) { showError("Enter your email and a password of at least 8 characters."); return; }
+  if (busy) return;
+  busy = true;
+  try {
+    if (authMode === "signup") {
+      const { data: r, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } });
+      if (error) { showError(error.message); return; }
+      if (r.session) { user = r.user; await afterLogin(); }
+      else { notice = "Check your email to confirm your account, then log in."; authMode = "login"; view = "auth"; }
+    } else {
+      const { data: r, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { showError(error.message); return; }
+      user = r.user;
+      await afterLogin();
+    }
+    render();
+  } finally { busy = false; }
+}
+
+async function saveProfile(data, editing) {
+  if (busy) return;
+  busy = true;
+  try {
+    const row = {
+      id: user.id,
+      nickname: data.get("name").toString().trim(),
+      gender: data.get("gender"),
+      seeking: data.getAll("seeking"),
+      area: data.get("location").toString(),
+      bio: (data.get("bio") || "").toString().trim(),
+      interests: (data.get("interests") || "").toString().split(",").map((s) => s.trim()).filter(Boolean).slice(0, 4),
+      adult_confirmed: true,
+    };
+    const r1 = await sb.from("profiles").upsert(row);
+    if (r1.error) { showError(r1.error.message); return; }
+    const r2 = await sb.from("contacts").upsert({ profile_id: user.id, phone: data.get("contact").toString().trim() });
+    if (r2.error) { showError(r2.error.message); return; }
+    await loadMe();
+    await loadPeople();
+    view = editing ? "profile" : "browse";
+    render();
+  } finally { busy = false; }
+}
 
 /* ---------- Views ---------- */
 
 function welcomeView() {
   const mini = (id, line) => { const p = byId(id); return `<div class="fc fc-${id}">${avatar(p, "sm")}<div><strong>${esc(p.name)}</strong><span>${esc(line)}</span></div></div>`; };
+  const head = user
+    ? `<button class="btn sun small" data-act="start">Open</button>`
+    : `<span><button class="link" data-act="tologin">Log in</button> <button class="btn sun small" data-act="start">Join free</button></span>`;
   return `
   <main class="landing-page">
-    <header class="l-top"><span class="brand">Egerton Connect</span><button class="btn sun small" data-act="start">Join free</button></header>
+    <header class="l-top"><span class="brand">Egerton Connect</span>${head}</header>
     <section class="hero">
       <div class="hero-in">
         <div class="hero-copy">
           <span class="pill reveal" style="--d:0s">For the whole Egerton community, 18+</span>
           <h1 class="reveal" style="--d:.1s">Meet someone <em>around Egerton.</em></h1>
-          <p class="lead reveal" style="--d:.2s">Create a profile with your photos and where you are. Browse people nearby and unlock their contact when you're ready.</p>
+          <p class="lead reveal" style="--d:.2s">Create a profile with a nickname and where you are. Browse people nearby and unlock their contact when you're ready.</p>
           <button class="btn sun big reveal" style="--d:.3s" data-act="start">Create my profile</button>
           <p class="fine reveal" style="--d:.4s">Free to join. Just 3 quick steps.</p>
         </div>
@@ -83,7 +176,7 @@ function welcomeView() {
     <section class="how">
       <h2>How it works</h2>
       <div class="steps3">
-        <div class="how-card"><span class="num">1</span><h3>Create your profile</h3><p>Add photos, where you are and a few words about you.</p></div>
+        <div class="how-card"><span class="num">1</span><h3>Create your profile</h3><p>Pick a nickname, your area and a few words about you.</p></div>
         <div class="how-card"><span class="num">2</span><h3>Browse people</h3><p>See who is around Egerton and read their profiles.</p></div>
         <div class="how-card"><span class="num">3</span><h3>Unlock contact</h3><p>Found someone you like? Unlock their contact and reach out yourself.</p></div>
       </div>
@@ -97,30 +190,38 @@ function welcomeView() {
   </main>`;
 }
 
-function thumbsHtml() {
-  return draftPhotos.map((src, i) => `<div class="th"><img src="${esc(src)}" alt="Your photo ${i + 1}" /><button type="button" data-act="rmphoto" data-i="${i}" aria-label="Remove photo ${i + 1}">&times;</button></div>`).join("");
+function authView() {
+  const signup = authMode === "signup";
+  return `<div class="topbar"><h2>${signup ? "Create your account" : "Log in"}</h2></div>
+  <form class="form" data-form="auth" novalidate>
+    ${noticeHtml()}
+    <div class="error" id="formError" role="alert" hidden></div>
+    <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" /><div class="hint">Used only to log in. It is never shown on your profile.</div></div>
+    <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="${signup ? "new-password" : "current-password"}" /><div class="hint">At least 8 characters.</div></div>
+    <button class="btn" type="submit">${signup ? "Continue" : "Log in"}</button>
+    <button class="btn ghost" type="button" data-act="${signup ? "tologin" : "tosignup"}">${signup ? "I already have an account" : "Create a new account"}</button>
+    <button class="btn ghost" type="button" data-act="nav" data-to="welcome">Back</button>
+  </form>`;
 }
 
 function formView() {
-  const me = state.me || {};
-  const editing = !!state.me;
-  const seeking = me.seeking || [];
+  const editing = view === "edit";
+  const m = editing ? me : {};
+  const seeking = m.seeking || [];
   const chip = (type, name, g, on) => `<label class="chip"><input type="${type}" name="${name}" value="${g[0]}" ${on ? "checked" : ""} /><span>${g[1]}</span></label>`;
-  const nameF = `<div class="field"><label for="name">Choose a nickname</label><input id="name" name="name" type="text" maxlength="30" autocomplete="off" placeholder="e.g. Sunrise" value="${esc(me.name || "")}" /><div class="hint">Shown to everyone, so please do not use your real name.</div></div>`;
-  const genderF = `<div class="field"><fieldset><legend>I am</legend><div class="chips">${GENDERS.map((g) => chip("radio", "gender", g, me.gender === g[0])).join("")}</div></fieldset></div>`;
+  const nameF = `<div class="field"><label for="name">Choose a nickname</label><input id="name" name="name" type="text" maxlength="30" autocomplete="off" placeholder="e.g. Sunrise" value="${esc(m.name || "")}" /><div class="hint">Shown to everyone, so please do not use your real name.</div></div>`;
+  const genderF = `<div class="field"><fieldset><legend>I am</legend><div class="chips">${GENDERS.map((g) => chip("radio", "gender", g, m.gender === g[0])).join("")}</div></fieldset></div>`;
   const seekF = `<div class="field"><fieldset><legend>I want to meet</legend><div class="chips">${GENDERS.map((g) => chip("checkbox", "seeking", g, seeking.includes(g[0]))).join("")}</div><div class="hint">Pick one or more.</div></fieldset></div>`;
-  const locF = `<div class="field"><label for="location">Current area</label><select id="location" name="location"><option value="">Choose an area</option>${ZONES.map((z) => `<option ${me.location === z ? "selected" : ""}>${z}</option>`).join("")}</select><div class="hint">A general area only, so nobody can find your exact spot.</div></div>`;
-  const bioF = `<div class="field"><label for="bio">About me <span class="hint">(optional)</span></label><textarea id="bio" name="bio" maxlength="200" placeholder="A line or two about you">${esc(me.bio || "")}</textarea></div>`;
-  const intF = `<div class="field"><label for="interests">Interests <span class="hint">(optional)</span></label><input id="interests" name="interests" type="text" placeholder="Football, Movies, Coding" value="${esc((me.interests || []).join(", "))}" /><div class="hint">Separate with commas. Up to 4.</div></div>`;
-  const photoF = `<div class="field"><label for="photos">Photos <span class="hint">(optional, up to 3)</span></label><input id="photos" type="file" accept="image/*" multiple /><div class="thumbs" id="thumbs">${thumbsHtml()}</div></div>`;
-  const contactF = `<div class="field"><label for="contact">Phone or WhatsApp number</label><input id="contact" name="contact" type="tel" maxlength="20" placeholder="07XX XXX XXX" value="${esc(me.contact || "")}" /><div class="hint">Hidden from everyone until they unlock it.</div></div>`;
+  const locF = `<div class="field"><label for="location">Current area</label><select id="location" name="location"><option value="">Choose an area</option>${ZONES.map((z) => `<option ${m.loc === z ? "selected" : ""}>${z}</option>`).join("")}</select><div class="hint">A general area only, so nobody can find your exact spot.</div></div>`;
+  const bioF = `<div class="field"><label for="bio">About me <span class="hint">(optional)</span></label><textarea id="bio" name="bio" maxlength="200" placeholder="A line or two about you">${esc(m.bio || "")}</textarea></div>`;
+  const intF = `<div class="field"><label for="interests">Interests <span class="hint">(optional)</span></label><input id="interests" name="interests" type="text" placeholder="Football, Movies, Coding" value="${esc((m.interests || []).join(", "))}" /><div class="hint">Separate with commas. Up to 4.</div></div>`;
+  const contactF = `<div class="field"><label for="contact">Phone or WhatsApp number</label><input id="contact" name="contact" type="tel" maxlength="20" placeholder="07XX XXX XXX" value="${esc(m.contact || "")}" /><div class="hint">Hidden from everyone until they unlock it.</div></div>`;
   const consentF = `<label class="check"><input type="checkbox" name="consent" /> <span>I am 18 or older and I will treat people with respect.</span></label>`;
-  const blurF = `<label class="check"><input type="checkbox" name="blur" ${me.blur ? "checked" : ""} /> <span>Blur my photos until someone unlocks my contact.</span></label>`;
   const errBox = `<div class="error" id="formError" role="alert" hidden></div>`;
 
   if (editing) {
     return `<div class="topbar"><h2>Edit profile</h2></div>
-    <form class="form" data-form="profile" novalidate>${errBox}${nameF}${genderF}${seekF}${locF}${bioF}${intF}${photoF}${blurF}${contactF}
+    <form class="form" data-form="profile" novalidate>${errBox}${nameF}${genderF}${seekF}${locF}${bioF}${intF}${contactF}
       <button class="btn" type="submit">Save changes</button>
       <button class="btn ghost" type="button" data-act="nav" data-to="profile">Cancel</button></form>`;
   }
@@ -129,7 +230,7 @@ function formView() {
   <form class="form" data-form="profile" novalidate>${errBox}
     <section class="step" data-step="1"><h3 class="step-title">First, the basics</h3>${nameF}${genderF}${seekF}</section>
     <section class="step" data-step="2" hidden><h3 class="step-title">About you</h3>${locF}${bioF}${intF}</section>
-    <section class="step" data-step="3" hidden><h3 class="step-title">Photos and contact</h3>${photoF}${blurF}${contactF}${consentF}</section>
+    <section class="step" data-step="3" hidden><h3 class="step-title">Contact</h3>${contactF}${consentF}</section>
     <div class="step-nav">
       <button class="btn ghost" type="button" data-act="prev">Back</button>
       <button class="btn" type="button" id="nextBtn" data-act="next">Next</button>
@@ -139,10 +240,11 @@ function formView() {
 }
 
 function cardHtml(p) {
-  const open = state.unlocked.includes(p.id);
+  const open = p.sample ? sampleUnlocked.includes(p.id) : unlockedIds.has(p.id);
+  const number = p.sample ? p.contact : revealed[p.id];
   const contact = open
-    ? `<a class="contact" href="tel:${esc(tel(p.contact))}">${esc(p.contact)}</a>`
-    : `<div class="lock"><span>${esc(mask(p.contact))}</span><button class="btn small sun" data-act="unlock" data-id="${p.id}">Unlock contact</button></div>`;
+    ? (number ? `<a class="contact" href="tel:${esc(tel(number))}">${esc(number)}</a>` : `<p class="hint">Contact unlocked.</p>`)
+    : `<div class="lock"><span>${esc(mask(p.contact))}</span><button class="btn small sun" data-act="unlock" data-id="${esc(p.id)}">Unlock contact</button></div>`;
   return `<article class="card">${photoOf(p, p.blur && !open)}<div class="body">
     <h3>${esc(p.name)}</h3><p class="loc">Now in ${esc(p.loc)}</p>${p.blur && !open ? `<p class="hint">Photo is blurred until you unlock contact.</p>` : ""}
     ${p.bio ? `<p>${esc(p.bio)}</p>` : ""}
@@ -150,33 +252,32 @@ function cardHtml(p) {
 }
 
 function browseView() {
-  const list = PROFILES.filter((p) => state.me.seeking.includes(p.gender));
+  const samples = !people.length;
+  const list = samples ? PROFILES.filter((p) => me.seeking.includes(p.gender)) : people;
   return `<div class="topbar"><h2>Browse</h2><span class="tag">18+</span></div>
+    ${noticeHtml()}
+    ${samples ? `<p class="hint pad">Early preview: these are sample profiles until more people join.</p>` : ""}
     ${list.length ? `<div class="cards">${list.map(cardHtml).join("")}</div>` : `<div class="empty"><h3>No profiles yet</h3><p>More people will appear as more members join.</p></div>`}`;
 }
 
 function profileView() {
-  const m = state.me;
   return `<div class="topbar"><h2>My profile</h2></div>
   <div class="profile">
-    <div class="card">${photoOf(m, m.blur)}<div class="body">
-      <h3>${esc(m.name)}</h3><p class="loc">Now in ${esc(m.location)}</p>
-      <p class="meta">${esc(genderLabel(m.gender))}. Meeting: ${m.seeking.map(genderLabel).join(", ")}</p>
-      ${m.bio ? `<p>${esc(m.bio)}</p>` : ""}
-      <div class="tags">${(m.interests || []).map((i) => `<span>${esc(i)}</span>`).join("")}</div>
-      <p class="hint" style="margin-top:14px">Your contact (${esc(m.contact)}) stays hidden from others until they unlock it.</p>
+    <div class="card">${avatar(me)}<div class="body">
+      <h3>${esc(me.name)}</h3><p class="loc">Now in ${esc(me.loc)}</p>
+      <p class="meta">${esc(genderLabel(me.gender))}. Meeting: ${me.seeking.map(genderLabel).join(", ")}</p>
+      ${me.bio ? `<p>${esc(me.bio)}</p>` : ""}
+      <div class="tags">${me.interests.map((i) => `<span>${esc(i)}</span>`).join("")}</div>
+      <p class="hint" style="margin-top:14px">Your contact (${esc(me.contact)}) stays hidden from others until they unlock it.</p>
     </div></div>
-    <div class="box"><h3>Photo privacy</h3>
-      <p class="hint">${m.blur ? "Your photos are blurred. Others see them blurred until they unlock your contact." : "Your photos are visible to everyone browsing."}</p>
-      <button class="btn ${m.blur ? "sun" : "ghost"}" data-act="toggleblur">${m.blur ? "Show my photos" : "Blur my photos"}</button>
-    </div>
     <button class="btn" data-act="edit">Edit profile</button>
     <div class="box"><h3>Stay safe</h3><ul>
       <li>Meet in public places first.</li>
       <li>Tell a friend where you are going.</li>
       <li>Never send money to someone you met here.</li>
       <li>Share only a general location, never your exact address.</li></ul></div>
-    <button class="btn danger" data-act="delete">Delete my account</button>
+    <button class="btn ghost" data-act="logout">Log out</button>
+    <button class="btn danger" data-act="delete">Delete my profile</button>
   </div>`;
 }
 
@@ -187,7 +288,8 @@ function navView() {
 
 function unlockModal() {
   if (!unlockId) return "";
-  const p = byId(unlockId);
+  const p = byId(unlockId) || people.find((x) => x.id === unlockId);
+  if (!p) return "";
   return `<div class="overlay" role="dialog" aria-modal="true" aria-label="Unlock contact"><div class="modal">
     ${avatar(p, "sm")}<h2>Unlock ${esc(p.name)}'s contact</h2>
     <p>In the live version, contact access will be a paid feature. Payments are not switched on in this preview, so you can unlock for free.</p>
@@ -236,64 +338,63 @@ function stepNav(dir) {
   showStep(step + 1);
 }
 
-function shrink(file) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const r = Math.min(1, 640 / Math.max(img.width, img.height));
-      const c = document.createElement("canvas");
-      c.width = Math.round(img.width * r);
-      c.height = Math.round(img.height * r);
-      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(url);
-      resolve(c.toDataURL("image/jpeg", 0.72));
-    };
-    img.onerror = reject;
-    img.src = url;
-  });
-}
-
-async function addPhotos(files) {
-  for (const f of Array.from(files)) {
-    if (draftPhotos.length >= 3) break;
-    try { draftPhotos.push(await shrink(f)); } catch (e) { /* skip unreadable file */ }
-  }
-  const box = document.getElementById("thumbs");
-  if (box) box.innerHTML = thumbsHtml();
-}
-
 /* ---------- Render ---------- */
 
 function render() {
-  if (!state.me && view !== "welcome" && view !== "signup") view = "welcome";
+  if (!user && view !== "welcome" && view !== "auth") view = "welcome";
+  if (user && !me && ["browse", "profile", "edit"].includes(view)) view = "create";
   let html = "";
   if (view === "welcome") html = welcomeView();
-  else if (view === "signup" || view === "edit") html = formView();
+  else if (view === "auth") html = authView();
+  else if (view === "create" || view === "edit") html = formView();
   else if (view === "browse") html = browseView() + navView();
   else if (view === "profile") html = profileView() + navView();
   app.innerHTML = html + unlockModal();
   document.body.classList.toggle("landing", view === "welcome");
-  if (view === "signup") showStep(1);
+  if (view === "create") showStep(1);
   window.scrollTo(0, 0);
 }
 
 /* ---------- Actions ---------- */
 
 const actions = {
-  start: () => { view = "signup"; step = 1; draftPhotos = []; },
+  start: () => {
+    step = 1;
+    if (user) view = me ? "browse" : "create";
+    else { authMode = "signup"; view = "auth"; }
+  },
+  tologin: () => { authMode = "login"; view = "auth"; },
+  tosignup: () => { authMode = "signup"; view = "auth"; },
   nav: (d) => { view = d.to; },
-  edit: () => { view = "edit"; draftPhotos = (state.me.photos || []).slice(); },
-  toggleblur: () => { state.me.blur = !state.me.blur; save(); },
+  edit: () => { view = "edit"; },
   unlock: (d) => { unlockId = d.id; },
   closeunlock: () => { unlockId = null; },
-  confirmunlock: () => { if (!state.unlocked.includes(unlockId)) state.unlocked.push(unlockId); unlockId = null; save(); },
-  delete: () => {
-    if (confirm("Delete your profile and all your data from this device?")) {
-      state = fresh();
-      try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
-      view = "welcome";
+  confirmunlock: async () => {
+    const id = unlockId;
+    unlockId = null;
+    const real = people.find((x) => x.id === id);
+    if (!real) {
+      if (!sampleUnlocked.includes(id)) sampleUnlocked.push(id);
+      try { localStorage.setItem(SKEY, JSON.stringify(sampleUnlocked)); } catch (e) { /* ignore */ }
+      return;
     }
+    const { error } = await sb.rpc("unlock_for_testing", { target: id });
+    if (error) { notice = "Could not unlock: " + error.message; return; }
+    unlockedIds.add(id);
+    revealed[id] = await getContact(id);
+  },
+  logout: async () => {
+    await sb.auth.signOut();
+    user = null; me = null; people = []; unlockedIds = new Set(); revealed = {};
+    view = "welcome";
+  },
+  delete: async () => {
+    if (!confirm("Delete your profile and contact number? Your login email stays until you ask us to remove it.")) return;
+    const { error } = await sb.from("profiles").delete().eq("id", user.id);
+    if (error) { notice = "Could not delete: " + error.message; return; }
+    await sb.auth.signOut();
+    user = null; me = null; people = []; unlockedIds = new Set(); revealed = {};
+    view = "welcome";
   },
 };
 
@@ -302,35 +403,28 @@ app.addEventListener("click", (e) => {
   if (!el) return;
   const act = el.dataset.act;
   if (act === "next" || act === "prev") { stepNav(act); return; }
-  if (act === "rmphoto") { draftPhotos.splice(Number(el.dataset.i), 1); document.getElementById("thumbs").innerHTML = thumbsHtml(); return; }
-  if (actions[act]) { actions[act](el.dataset); render(); }
+  if (!actions[act]) return;
+  Promise.resolve(actions[act](el.dataset)).then(render);
 });
 
-app.addEventListener("change", (e) => {
-  if (e.target.id === "photos") { addPhotos(e.target.files); e.target.value = ""; }
-});
-
-app.addEventListener("submit", (e) => {
+app.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const data = new FormData(e.target);
-  const editing = !!state.me;
+  const form = e.target;
+  const data = new FormData(form);
+  if (form.dataset.form === "auth") { await doAuth(data); return; }
+  const editing = view === "edit";
   if (!editing && step < STEPS) { stepNav("next"); return; }
   const err = validate(data, editing);
   if (err) { if (!editing) showStep(err[1]); showError(err[0]); return; }
-  state.me = {
-    name: data.get("name").toString().trim(),
-    gender: data.get("gender"),
-    seeking: data.getAll("seeking"),
-    location: data.get("location").toString().trim(),
-    bio: (data.get("bio") || "").toString().trim(),
-    interests: (data.get("interests") || "").toString().split(",").map((s) => s.trim()).filter(Boolean).slice(0, 4),
-    contact: data.get("contact").toString().trim(),
-    photos: draftPhotos.slice(),
-    blur: !!data.get("blur"),
-  };
-  save();
-  view = editing ? "profile" : "browse";
-  render();
+  await saveProfile(data, editing);
 });
 
+/* ---------- Start ---------- */
+
 render();
+(async () => {
+  try {
+    const { data } = await sb.auth.getSession();
+    if (data.session) { user = data.session.user; await afterLogin(); render(); }
+  } catch (e) { /* stay on the landing page */ }
+})();

@@ -259,3 +259,9 @@ body.landing #app { max-width: none; padding-bottom: 0; background: var(--paper)
 .thumbs img { width: 76px; height: 76px; object-fit: cover; border-radius: 12px; border: 2px solid var(--line); display: block; }
 .thumbs button { position: absolute; top: -8px; right: -8px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: var(--danger); color: var(--white); line-height: 1; }
 .photo.blurred { filter: blur(18px); transform: scale(1.12); }
+
+/* ===== Accounts ===== */
+.notice { background: #e6f2ea; color: var(--forest); padding: 10px 14px; border-radius: 12px; font-weight: 600; margin: 0 20px; }
+.form .notice { margin: 0; }
+.pad { padding: 0 20px; }
+.link { background: none; border: 0; color: var(--white); font-weight: 600; text-decoration: underline; padding: 8px 12px; }
