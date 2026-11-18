@@ -1,7 +1,7 @@
 /* Plain-language draft of the About, Terms and Privacy pages.
    Have a lawyer review these before launch. Set CONTACT_EMAIL to a real support address. */
 
-const CONTACT_EMAIL = "";
+const CONTACT_EMAIL = "abiudalchemy@gmail.com";
 
 const contactLine = CONTACT_EMAIL
   ? `<p>Email us at <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>`
