@@ -10,6 +10,7 @@ if (!window.supabase) {
 }
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+const LEGALKEYS = ["about", "terms", "privacy"];
 const GENDERS = [["woman", "Woman"], ["man", "Man"], ["nonbinary", "Non-binary"]];
 const INTEREST = { woman: "Women", man: "Men", nonbinary: "Non-binary people" };
 const ZONES = ["Egerton main campus", "Egerton area", "Njoro town", "Njoro, near the market", "Nakuru town", "Elsewhere nearby"];
@@ -254,6 +255,7 @@ function welcomeView() {
       <h2>Ready to meet someone?</h2>
       <button class="btn sun big" data-act="start">Create my profile</button>
       <p class="fine">Early preview: sample profiles are shown until more people join.</p>
+      <nav class="foot-links light" aria-label="Site information"><a href="#about">About</a><a href="#terms">Terms</a><a href="#privacy">Privacy</a></nav>
     </section>
     <div class="sticky-cta"><button class="btn sun" data-act="start">Create my profile</button></div>
   </main>`;
@@ -285,7 +287,7 @@ function formView() {
   const bioF = `<div class="field"><label for="bio">About me <span class="hint">(optional)</span></label><textarea id="bio" name="bio" maxlength="200" placeholder="A line or two about you">${esc(m.bio || "")}</textarea></div>`;
   const intF = `<div class="field"><label for="interests">Interests <span class="hint">(optional)</span></label><input id="interests" name="interests" type="text" placeholder="Football, Movies, Coding" value="${esc((m.interests || []).join(", "))}" /><div class="hint">Separate with commas. Up to 4.</div></div>`;
   const contactF = `<div class="field"><label for="contact">Phone or WhatsApp number</label><input id="contact" name="contact" type="tel" maxlength="20" placeholder="07XX XXX XXX" value="${esc(m.contact || "")}" /><div class="hint">Hidden from everyone until they unlock it.</div></div>`;
-  const consentF = `<label class="check"><input type="checkbox" name="consent" /> <span>I am 18 or older and I will treat people with respect.</span></label>`;
+  const consentF = `<label class="check"><input type="checkbox" name="consent" /> <span>I am 18 or older, I agree to the <a href="#terms" target="_blank" rel="noopener">Terms</a> and <a href="#privacy" target="_blank" rel="noopener">Privacy Policy</a>, and I will treat people with respect.</span></label>`;
   const photoF = `<div class="field"><label for="photos">Photos <span class="hint">(optional, up to 3)</span></label><input id="photos" type="file" accept="image/*" multiple /><div class="thumbs" id="thumbs">${thumbsHtml()}</div><div class="hint">A blurred copy is made for you automatically.</div></div>`;
   const blurF = `<label class="check"><input type="checkbox" name="blur" ${m.blur ? "checked" : ""} /> <span>Blur my photos until someone unlocks my contact.</span></label>`;
   const errBox = `<div class="error" id="formError" role="alert" hidden></div>`;
@@ -339,8 +341,14 @@ function appHead() {
     <button class="me-chip" data-act="nav" data-to="profile" aria-label="My profile">${avatar(me, "sm")}</button></header>`;
 }
 
+function legalView(key) {
+  const page = LEGAL[key];
+  return `<main class="legal"><button class="link dark" data-act="legalback">&larr; Back</button><h1>${page.title}</h1><p class="updated">Last updated: 18 November 2026</p>${page.html}
+    <nav class="foot-links" aria-label="Site information"><a href="#about">About</a><a href="#terms">Terms</a><a href="#privacy">Privacy</a></nav></main>`;
+}
+
 function footerHtml() {
-  return `<footer class="site-foot"><strong>Egerton Connect</strong><span>Made for the Egerton community. Adults only (18+).</span></footer>`;
+  return `<footer class="site-foot"><strong>Egerton Connect</strong><span>Made for the Egerton community. Adults only (18+).</span><nav class="foot-links" aria-label="Site information"><a href="#about">About</a><a href="#terms">Terms</a><a href="#privacy">Privacy</a></nav></footer>`;
 }
 
 function completeCard() {
@@ -499,7 +507,7 @@ function validate(data, editing) {
   if (!data.getAll("seeking").length) return ["Choose who you are interested in.", 1];
   if (!(data.get("location") || "").toString().trim()) return ["Choose your current area.", 2];
   if (digits.length < 9) return ["Enter a valid phone number.", 3];
-  if (!editing && !data.get("consent")) return ["Please confirm you are 18 or older.", 3];
+  if (!editing && !data.get("consent")) return ["Please confirm you are 18 or older and agree to the Terms and Privacy Policy.", 3];
   return null;
 }
 
@@ -564,10 +572,11 @@ async function processPhoto(file) {
 /* ---------- Render ---------- */
 
 function render(keep) {
-  if (!user && view !== "welcome" && view !== "auth") view = "welcome";
+  if (!user && view !== "welcome" && view !== "auth" && !LEGALKEYS.includes(view)) view = "welcome";
   if (user && !me && ["browse", "saved", "profile", "edit"].includes(view)) view = "create";
   let html = "";
   if (view === "welcome") html = welcomeView();
+  else if (LEGALKEYS.includes(view)) html = legalView(view);
   else if (view === "auth") html = authView();
   else if (view === "create" || view === "edit") html = formView();
   else if (view === "browse") html = browseView() + navView();
@@ -588,6 +597,7 @@ const actions = {
     if (user) view = me ? "browse" : "create";
     else { authMode = "signup"; view = "auth"; }
   },
+  legalback: () => { history.replaceState(null, "", window.location.pathname); view = user ? (me ? "browse" : "create") : "welcome"; },
   report: (d) => { reportId = d.id; },
   closereport: () => { reportId = null; },
   unblock: async (d) => {
@@ -689,10 +699,16 @@ app.addEventListener("submit", async (e) => {
 
 /* ---------- Start ---------- */
 
+{ const h = window.location.hash.slice(1); if (LEGALKEYS.includes(h)) view = h; }
+window.addEventListener("hashchange", () => {
+  const h = window.location.hash.slice(1);
+  if (LEGALKEYS.includes(h)) { view = h; render(); }
+  else if (LEGALKEYS.includes(view)) { view = user ? (me ? "browse" : "create") : "welcome"; render(); }
+});
 render();
 (async () => {
   try {
     const { data } = await sb.auth.getSession();
-    if (data.session) { user = data.session.user; await afterLogin(); render(); }
+    if (data.session) { const keep = LEGALKEYS.includes(view) ? view : null; user = data.session.user; await afterLogin(); if (keep) view = keep; render(); }
   } catch (e) { /* stay on the landing page */ }
 })();
