@@ -51,6 +51,15 @@ let busy = false;
 let photoList = [];
 let areaFilter = "all";
 let justJoined = false;
+let query = "";
+let interestFilter = "all";
+const SAVEKEY = "egertonConnect.saved";
+let savedIds = new Set();
+try { savedIds = new Set(JSON.parse(localStorage.getItem(SAVEKEY)) || []); } catch (e) { /* ignore */ }
+function toggleSave(id) {
+  if (savedIds.has(id)) savedIds.delete(id); else savedIds.add(id);
+  try { localStorage.setItem(SAVEKEY, JSON.stringify([...savedIds])); } catch (e) { /* ignore */ }
+}
 
 const app = document.getElementById("app");
 const byId = (id) => PROFILES.find((p) => p.id === id);
@@ -294,37 +303,94 @@ function formView() {
   </form>`;
 }
 
+const HEART = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
+
 function cardHtml(p, i) {
   const open = p.sample ? sampleUnlocked.includes(p.id) : unlockedIds.has(p.id);
   const number = p.sample ? p.contact : revealed[p.id];
   const contact = open
     ? (number ? `<a class="contact" href="tel:${esc(tel(number))}">${esc(number)}</a>` : `<p class="hint">Contact unlocked.</p>`)
     : `<div class="lock"><span>${esc(mask(p.contact))}</span><button class="btn small sun" data-act="unlock" data-id="${esc(p.id)}">Unlock contact</button></div>`;
-  return `<article class="card" style="--i:${i || 0}">${photoBlock(p, p.blur && !open)}<div class="body">
-    <h3>${esc(p.name)}</h3><p class="loc">Now in ${esc(p.loc)}</p>${p.blur && !open ? `<p class="hint">Photo is blurred until you unlock contact.</p>` : ""}
-    ${p.bio ? `<p>${esc(p.bio)}</p>` : ""}
-    <div class="tags">${(p.interests || []).map((i) => `<span>${esc(i)}</span>`).join("")}</div>${contact}</div></article>`;
+  const saved = savedIds.has(p.id);
+  return `<article class="card" style="--i:${i || 0}">
+    <div class="media">${photoBlock(p, p.blur && !open)}
+      <button class="heart${saved ? " on" : ""}" data-act="save" data-id="${esc(p.id)}" aria-pressed="${saved}" aria-label="Save ${esc(p.name)}">${HEART}</button>
+      <div class="cap"><h3>${esc(p.name)}</h3><span class="loc">Now in ${esc(p.loc)}</span></div>
+    </div>
+    <div class="body">${p.blur && !open ? `<p class="hint">Photo is blurred until you unlock contact.</p>` : ""}
+      ${p.bio ? `<p>${esc(p.bio)}</p>` : ""}
+      <div class="tags">${(p.interests || []).map((x) => `<span>${esc(x)}</span>`).join("")}</div>${contact}</div></article>`;
 }
 
+const greeting = () => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; };
+const baseList = () => (people.length ? people : PROFILES.filter((p) => me.seeking.includes(p.gender)));
+
 function appHead() {
-  return `<header class="app-head"><button class="brandbtn" data-act="nav" data-to="welcome" aria-label="Back to the home page">Egerton Connect</button><button class="me-chip" data-act="nav" data-to="profile" aria-label="My profile">${avatar(me, "sm")}</button></header>`;
+  const tab = (to, label) => `<button data-act="nav" data-to="${to}" ${view === to ? 'aria-current="page"' : ""}>${label}</button>`;
+  return `<header class="app-head"><button class="brandbtn" data-act="nav" data-to="welcome" aria-label="Back to the home page">Egerton Connect</button>
+    <nav class="topnav" aria-label="Main">${tab("browse", "Browse")}${tab("saved", "Saved")}${tab("profile", "My profile")}</nav>
+    <button class="me-chip" data-act="nav" data-to="profile" aria-label="My profile">${avatar(me, "sm")}</button></header>`;
+}
+
+function footerHtml() {
+  return `<footer class="site-foot"><strong>Egerton Connect</strong><span>Made for the Egerton community. Adults only (18+).</span></footer>`;
+}
+
+function completeCard() {
+  const checks = [true, me.photos.length > 0, !!me.bio, me.interests.length > 0];
+  const done = checks.filter(Boolean).length;
+  if (done === 4) return "";
+  const todo = [!checks[1] && "a photo", !checks[2] && "a short bio", !checks[3] && "your interests"].filter(Boolean).join(", ");
+  const pct = Math.round((done / 4) * 100);
+  return `<div class="complete"><div><strong>Your profile is ${pct}% complete</strong><span>Add ${todo} to stand out.</span><div class="meter"><i style="width:${pct}%"></i></div></div><button class="btn sun small" data-act="edit">Complete it</button></div>`;
+}
+
+function filtered() {
+  let list = baseList();
+  if (areaFilter !== "all") list = list.filter((p) => p.loc === areaFilter);
+  if (interestFilter !== "all") list = list.filter((p) => (p.interests || []).includes(interestFilter));
+  const q = query.trim().toLowerCase();
+  if (q) list = list.filter((p) => [p.name, p.bio, p.loc].concat(p.interests || []).join(" ").toLowerCase().includes(q));
+  return list;
+}
+
+function resultsHtml() {
+  const list = filtered();
+  const head = `<div class="results-head"><strong>${list.length} ${list.length === 1 ? "profile" : "profiles"}</strong><span>${areaFilter === "all" ? "across Egerton" : "in " + esc(areaFilter)}</span></div>`;
+  return head + (list.length ? `<div class="cards">${list.map(cardHtml).join("")}</div>` : `<div class="empty"><h3>No matches</h3><p>Try a different area, interest or search.</p></div>`);
 }
 
 function browseView() {
-  const samples = !people.length;
-  let list = samples ? PROFILES.filter((p) => me.seeking.includes(p.gender)) : people;
-  if (areaFilter !== "all") list = list.filter((p) => p.loc === areaFilter);
-  const chips = ["all"].concat(ZONES).map((z) => `<button class="fchip" data-act="area" data-z="${esc(z)}" aria-pressed="${areaFilter === z}">${z === "all" ? "Everyone" : esc(z)}</button>`).join("");
+  const base = baseList();
+  const counts = {};
+  base.forEach((p) => (p.interests || []).forEach((x) => { counts[x] = (counts[x] || 0) + 1; }));
+  const top = Object.keys(counts).sort((x, y) => counts[y] - counts[x]).slice(0, 8);
+  const achips = ["all"].concat(ZONES).map((z) => `<button class="fchip" data-act="area" data-z="${esc(z)}" aria-pressed="${areaFilter === z}">${z === "all" ? "Everyone" : esc(z)}</button>`).join("");
+  const ichips = ["all"].concat(top).map((x) => `<button class="fchip alt" data-act="interest" data-i="${esc(x)}" aria-pressed="${interestFilter === x}">${x === "all" ? "All interests" : esc(x)}</button>`).join("");
   const welcome = justJoined
     ? `<div class="welcome-card"><div class="confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><h3>You're in, ${esc(me.name)}!</h3><p>Your profile is live. Have a look around, and unlock a contact when you find someone you like.</p><button class="btn sun small" data-act="closewelcome">Got it</button></div>`
     : "";
   return `${appHead()}
-    <section class="b-intro"><h2>Hi ${esc(me.name)}</h2><p>Here's who's around Egerton today.</p></section>
-    ${welcome}
-    ${noticeHtml()}
-    <div class="fchips" role="group" aria-label="Filter by area">${chips}</div>
-    ${samples ? `<p class="hint pad">Early preview: these are sample profiles until more people join.</p>` : ""}
-    ${list.length ? `<div class="cards">${list.map(cardHtml).join("")}</div>` : `<div class="empty"><h3>No one here yet</h3><p>${areaFilter === "all" ? "More people will appear as more members join." : "Nobody is in this area right now. Try another area."}</p></div>`}`;
+    <section class="b-hero">
+      <p class="eyebrow">${greeting()}</p>
+      <h2>${esc(me.name)}, who will you meet today?</h2>
+      <div class="stats"><span><b>${base.length}</b> profiles</span><span><b>${new Set(base.map((p) => p.loc)).size}</b> areas</span><span><b>18+</b> only</span></div>
+      <label class="search"><span class="sr">Search profiles</span><input id="q" type="search" placeholder="Search by nickname or interest" value="${esc(query)}" autocomplete="off" /></label>
+      <div class="fchips" role="group" aria-label="Filter by area">${achips}</div>
+    </section>
+    ${welcome}${noticeHtml()}${completeCard()}
+    <section class="interests"><h3>Browse by interest</h3><div class="fchips" role="group" aria-label="Filter by interest">${ichips}</div></section>
+    ${!people.length ? `<p class="hint pad">Early preview: these are sample profiles until more people join.</p>` : ""}
+    <div id="results">${resultsHtml()}</div>
+    ${footerHtml()}`;
+}
+
+function savedView() {
+  const list = people.concat(PROFILES).filter((p) => savedIds.has(p.id));
+  return `${appHead()}
+    <section class="b-hero slim"><h2>Saved</h2><p>Profiles you have kept for later.</p></section>
+    ${list.length ? `<div class="cards">${list.map(cardHtml).join("")}</div>` : `<div class="empty"><h3>Nothing saved yet</h3><p>Tap the heart on a profile to keep it here.</p><button class="btn ghost" data-act="nav" data-to="browse">Browse profiles</button></div>`}
+    ${footerHtml()}`;
 }
 
 function profileView() {
@@ -350,7 +416,7 @@ function profileView() {
 
 function navView() {
   const tab = (to, label) => `<button data-act="nav" data-to="${to}" ${view === to ? 'aria-current="page"' : ""}>${label}</button>`;
-  return `<nav class="nav" aria-label="Main">${tab("browse", "Browse")}${tab("profile", "My profile")}</nav>`;
+  return `<nav class="nav" aria-label="Main">${tab("browse", "Browse")}${tab("saved", "Saved")}${tab("profile", "My profile")}</nav>`;
 }
 
 function unlockModal() {
@@ -437,19 +503,20 @@ async function processPhoto(file) {
 
 /* ---------- Render ---------- */
 
-function render() {
+function render(keep) {
   if (!user && view !== "welcome" && view !== "auth") view = "welcome";
-  if (user && !me && ["browse", "profile", "edit"].includes(view)) view = "create";
+  if (user && !me && ["browse", "saved", "profile", "edit"].includes(view)) view = "create";
   let html = "";
   if (view === "welcome") html = welcomeView();
   else if (view === "auth") html = authView();
   else if (view === "create" || view === "edit") html = formView();
   else if (view === "browse") html = browseView() + navView();
+  else if (view === "saved") html = savedView() + navView();
   else if (view === "profile") html = profileView() + navView();
   app.innerHTML = html + unlockModal();
   document.body.classList.toggle("landing", view === "welcome");
   if (view === "create") showStep(1);
-  window.scrollTo(0, 0);
+  if (!keep) window.scrollTo(0, 0);
 }
 
 /* ---------- Actions ---------- */
@@ -462,6 +529,7 @@ const actions = {
     else { authMode = "signup"; view = "auth"; }
   },
   area: (d) => { areaFilter = d.z; },
+  interest: (d) => { interestFilter = d.i; },
   closewelcome: () => { justJoined = false; },
   tologin: () => { authMode = "login"; view = "auth"; },
   tosignup: () => { authMode = "signup"; view = "auth"; },
@@ -510,9 +578,20 @@ app.addEventListener("click", (e) => {
   if (!el) return;
   const act = el.dataset.act;
   if (act === "next" || act === "prev") { stepNav(act); return; }
+  if (act === "save") {
+    toggleSave(el.dataset.id);
+    el.classList.toggle("on");
+    el.setAttribute("aria-pressed", String(el.classList.contains("on")));
+    if (view === "saved") render(true);
+    return;
+  }
   if (act === "rmphoto") { photoList.splice(Number(el.dataset.i), 1); document.getElementById("thumbs").innerHTML = thumbsHtml(); return; }
   if (!actions[act]) return;
-  Promise.resolve(actions[act](el.dataset)).then(render);
+  Promise.resolve(actions[act](el.dataset)).then(() => render(act === "area" || act === "interest"));
+});
+
+app.addEventListener("input", (e) => {
+  if (e.target.id === "q") { query = e.target.value; document.getElementById("results").innerHTML = resultsHtml(); }
 });
 
 app.addEventListener("change", async (e) => {
