@@ -67,7 +67,7 @@ const LEGAL = {
       <p>The site is provided as it is, and may sometimes be unavailable or contain mistakes. We are not responsible for what users say or do, or for any meetings or relationships that result. To the extent the law allows, we are not liable for losses arising from your use of the site. Nothing in these terms limits any rights you have under Kenyan law that cannot be limited.</p>
 
       <h2>9. Ending your account</h2>
-      <p>You can delete your profile at any time from the My profile page. We may suspend or end accounts as described above.</p>
+      <p>You can pause your profile, or delete your account, at any time from the My profile page. We may suspend or end accounts as described above.</p>
 
       <h2>10. Changes and governing law</h2>
       <p>We may update these terms and will show the date of the latest update. Continuing to use the site means you accept the changes. These terms are governed by the laws of Kenya.</p>
@@ -108,10 +108,10 @@ const LEGAL = {
       <p>We use Supabase for our database, login and photo storage, with servers in Frankfurt, Germany, and Vercel to host the website. When email sending and payments are switched on, an email service and a payment provider (such as M-Pesa) will also handle the data needed for those tasks. Because some of these providers are outside Kenya, your information may be processed abroad.</p>
 
       <h2>How long we keep it</h2>
-      <p>We keep your profile while your account exists. When you delete your profile from the My profile page, your profile details, photos and contact number are deleted. Your login email stays until you ask us to remove it. We may keep reports for as long as needed to keep people safe.</p>
+      <p>We keep your profile while your account exists. When you delete your account from the My profile page, your profile details, photos, contact number and login email are deleted. We may keep reports for as long as needed to keep people safe.</p>
 
       <h2>Your rights</h2>
-      <p>Under Kenya's Data Protection Act you can ask to see, correct or delete your information, and object to how it is used. You can also complain to the Office of the Data Protection Commissioner.</p>
+      <p>Under Kenya's Data Protection Act you can ask to see, correct or delete your information, and object to how it is used. You can download a copy of your profile information from the My profile page. You can also complain to the Office of the Data Protection Commissioner.</p>
 
       <h2>Under 18s</h2>
       <p>Egerton Connect is for adults only. If we learn that someone under 18 has an account, we will remove it.</p>

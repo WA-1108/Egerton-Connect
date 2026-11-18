@@ -62,6 +62,8 @@ const loadHidden = () => { try { return new Set(JSON.parse(localStorage.getItem(
 let hiddenIds = loadHidden();
 let blockedList = [];
 let reportId = null;
+let pwOpen = false;
+let recovering = false;
 function toggleSave(id) {
   if (savedIds.has(id)) savedIds.delete(id); else savedIds.add(id);
   try { localStorage.setItem(SAVEKEY, JSON.stringify([...savedIds])); } catch (e) { /* ignore */ }
@@ -112,7 +114,7 @@ async function loadMe() {
   const { data: p } = await sb.from("profiles").select("*").eq("id", user.id).maybeSingle();
   if (!p) { me = null; return; }
   const { data: c } = await sb.from("contacts").select("phone").eq("profile_id", user.id).maybeSingle();
-  me = { id: p.id, name: p.nickname, gender: p.gender, seeking: p.seeking, loc: p.area, bio: p.bio || "", interests: p.interests || [], contact: c ? c.phone : "", blur: !!p.blur_photos, photos: p.photos || [] };
+  me = { id: p.id, name: p.nickname, gender: p.gender, seeking: p.seeking, loc: p.area, bio: p.bio || "", interests: p.interests || [], contact: c ? c.phone : "", blur: !!p.blur_photos, paused: !!p.paused, photos: p.photos || [] };
   me.clearUrls = await signUrls(me.photos.map((n) => `${user.id}/${n}.jpg`));
   me.blurUrls = await signUrls(me.photos.map((n) => `${user.id}/${n}-blur.jpg`));
 }
@@ -269,6 +271,7 @@ function authView() {
     <div class="error" id="formError" role="alert" hidden></div>
     <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" /><div class="hint">Used only to log in. It is never shown on your profile.</div></div>
     <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="${signup ? "new-password" : "current-password"}" /><div class="hint">At least 8 characters.</div></div>
+    ${signup ? "" : `<button class="link dark" type="button" data-act="forgot">Forgot your password?</button>`}
     <button class="btn" type="submit">${signup ? "Continue" : "Log in"}</button>
     <button class="btn ghost" type="button" data-act="${signup ? "tologin" : "tosignup"}">${signup ? "I already have an account" : "Create a new account"}</button>
     <button class="btn ghost" type="button" data-act="nav" data-to="welcome">Back</button>
@@ -393,6 +396,7 @@ function browseView() {
       <label class="search"><span class="sr">Search profiles</span><input id="q" type="search" placeholder="Search by nickname or interest" value="${esc(query)}" autocomplete="off" /></label>
       <div class="fchips" role="group" aria-label="Filter by area">${achips}</div>
     </section>
+    ${me.paused ? `<div class="notice paused"><span>Your profile is paused, so nobody can see it.</span><button class="btn sun small" data-act="togglepause">Show it again</button></div>` : ""}
     ${welcome}${noticeHtml()}${completeCard()}
     <section class="interests"><h3>Browse by interest</h3><div class="fchips" role="group" aria-label="Filter by interest">${ichips}</div></section>
     ${!people.length ? `<p class="hint pad">Early preview: these are sample profiles until more people join.</p>` : ""}
@@ -410,7 +414,7 @@ function savedView() {
 }
 
 function profileView() {
-  return `${appHead()}<div class="topbar"><h2>My profile</h2></div>
+  return `${appHead()}${noticeHtml()}<div class="topbar"><h2>My profile</h2></div>
   <div class="profile">
     <div class="card">${myPhotos()}<div class="body">
       <h3>${esc(me.name)}</h3>
@@ -425,9 +429,11 @@ function profileView() {
     </div></div>
     ${me.photos.length ? `<div class="box"><h3>Photo privacy</h3><p class="hint">${me.blur ? "Your photos are blurred. Others see them blurred until they unlock your contact." : "Your photos are visible to everyone browsing."}</p><button class="btn ${me.blur ? "sun" : "ghost"}" data-act="toggleblur">${me.blur ? "Show my photos" : "Blur my photos"}</button></div>` : ""}
     <button class="btn" data-act="edit">Edit profile</button>
+    <div class="box"><h3>Profile visibility</h3><p class="hint">${me.paused ? "Your profile is paused. Nobody can see it or unlock your contact." : "Your profile is visible to other members."}</p><button class="btn ${me.paused ? "sun" : "ghost"}" data-act="togglepause">${me.paused ? "Show my profile again" : "Pause my profile"}</button></div>
+    <div class="box"><h3>Account</h3><p class="hint">Signed in as ${esc(user.email)}. Only you can see this.</p><div class="acct"><button class="btn ghost" data-act="changepw">Change password</button><button class="btn ghost" data-act="exportdata">Download my data</button></div></div>
     ${blockedList.length ? `<div class="box"><h3>Blocked people</h3>${blockedList.map((b) => `<div class="blk"><span>${esc(b.name)}</span><button class="btn small ghost" data-act="unblock" data-id="${esc(b.id)}">Unblock</button></div>`).join("")}</div>` : ""}
     <button class="btn ghost" data-act="logout">Log out</button>
-    <button class="btn danger" data-act="delete">Delete my profile</button>
+    <button class="btn danger" data-act="delete">Delete my account</button>
   </div>`;
 }
 
@@ -445,6 +451,38 @@ function unlockModal() {
     <p>In the live version, contact access will be a paid feature. Payments are not switched on in this preview, so you can unlock for free.</p>
     <button class="btn sun" data-act="confirmunlock">Unlock (demo)</button>
     <button class="btn ghost" data-act="closeunlock">Not now</button></div></div>`;
+}
+
+/* ---------- Password ---------- */
+
+function pwModal() {
+  if (!pwOpen) return "";
+  return `<div class="overlay" role="dialog" aria-modal="true" aria-label="Change password"><form class="modal report" data-form="password">
+    <h2>${recovering ? "Set a new password" : "Change password"}</h2>
+    <div class="error" id="pwError" role="alert" hidden></div>
+    <div class="field"><label for="pw1">New password</label><input id="pw1" name="pw1" type="password" autocomplete="new-password" /></div>
+    <div class="field"><label for="pw2">Repeat it</label><input id="pw2" name="pw2" type="password" autocomplete="new-password" /></div>
+    <button class="btn sun" type="submit">Save password</button>
+    <button class="btn ghost" type="button" data-act="closepw">Cancel</button></form></div>`;
+}
+
+async function changePassword(data) {
+  const box = document.getElementById("pwError");
+  const fail = (m) => { box.textContent = m; box.hidden = false; };
+  const a = (data.get("pw1") || "").toString();
+  const b = (data.get("pw2") || "").toString();
+  if (a.length < 8) { fail("Use at least 8 characters."); return; }
+  if (a !== b) { fail("The two passwords do not match."); return; }
+  if (busy) return;
+  busy = true;
+  try {
+    const { error } = await sb.auth.updateUser({ password: a });
+    if (error) { fail(error.message); return; }
+    pwOpen = false;
+    recovering = false;
+    notice = "Your password has been updated.";
+    render();
+  } finally { busy = false; }
 }
 
 /* ---------- Report and block ---------- */
@@ -582,7 +620,7 @@ function render(keep) {
   else if (view === "browse") html = browseView() + navView();
   else if (view === "saved") html = savedView() + navView();
   else if (view === "profile") html = profileView() + navView();
-  app.innerHTML = html + unlockModal() + reportModal();
+  app.innerHTML = html + unlockModal() + reportModal() + pwModal();
   document.body.classList.toggle("landing", view === "welcome");
   if (view === "create") showStep(1);
   if (!keep) window.scrollTo(0, 0);
@@ -598,6 +636,27 @@ const actions = {
     else { authMode = "signup"; view = "auth"; }
   },
   legalback: () => { history.replaceState(null, "", window.location.pathname); view = user ? (me ? "browse" : "create") : "welcome"; },
+  changepw: () => { pwOpen = true; },
+  closepw: () => { pwOpen = false; recovering = false; },
+  togglepause: async () => {
+    const { error } = await sb.from("profiles").update({ paused: !me.paused }).eq("id", user.id);
+    if (error) { notice = "Could not update: " + error.message; return; }
+    me.paused = !me.paused;
+  },
+  forgot: async () => {
+    const email = ((document.getElementById("email") || {}).value || "").trim();
+    if (!email) { notice = "Type your email above first, then tap Forgot your password."; return; }
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    notice = error ? "Could not send the link: " + error.message : "If that email has an account, we have sent a link to reset the password.";
+  },
+  exportdata: () => {
+    const out = { email: user.email, nickname: me.name, gender: me.gender, interested_in: me.seeking, area: me.loc, bio: me.bio, interests: me.interests, contact_number: me.contact, photos: me.photos.length, photos_blurred: me.blur, profile_paused: !!me.paused, blocked_people: blockedList.map((b) => b.name), contacts_unlocked: unlockedIds.size, downloaded_at: new Date().toISOString() };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }));
+    a.download = "my-egerton-connect-data.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
   report: (d) => { reportId = d.id; },
   closereport: () => { reportId = null; },
   unblock: async (d) => {
@@ -641,11 +700,11 @@ const actions = {
     view = "welcome";
   },
   delete: async () => {
-    if (!confirm("Delete your profile and contact number? Your login email stays until you ask us to remove it.")) return;
-    if (me.photos.length) await sb.storage.from("photos").remove(me.photos.flatMap((n) => [`${user.id}/${n}.jpg`, `${user.id}/${n}-blur.jpg`]));
-    const { error } = await sb.from("profiles").delete().eq("id", user.id);
+    if (!confirm("Permanently delete your account? This removes your profile, photos, contact number and login. It cannot be undone.")) return;
+    if (me && me.photos.length) await sb.storage.from("photos").remove(me.photos.flatMap((n) => [`${user.id}/${n}.jpg`, `${user.id}/${n}-blur.jpg`]));
+    const { error } = await sb.rpc("delete_my_account");
     if (error) { notice = "Could not delete: " + error.message; return; }
-    await sb.auth.signOut();
+    await sb.auth.signOut({ scope: "local" });
     user = null; me = null; people = []; unlockedIds = new Set(); revealed = {}; hiddenIds = loadHidden(); blockedList = [];
     view = "welcome";
   },
@@ -690,6 +749,7 @@ app.addEventListener("submit", async (e) => {
   const data = new FormData(form);
   if (form.dataset.form === "auth") { await doAuth(data); return; }
   if (form.dataset.form === "report") { await sendReport(data); return; }
+  if (form.dataset.form === "password") { await changePassword(data); return; }
   const editing = view === "edit";
   if (!editing && step < STEPS) { stepNav("next"); return; }
   const err = validate(data, editing);
@@ -700,6 +760,9 @@ app.addEventListener("submit", async (e) => {
 /* ---------- Start ---------- */
 
 { const h = window.location.hash.slice(1); if (LEGALKEYS.includes(h)) view = h; }
+sb.auth.onAuthStateChange((event) => {
+  if (event === "PASSWORD_RECOVERY") { recovering = true; pwOpen = true; render(); }
+});
 window.addEventListener("hashchange", () => {
   const h = window.location.hash.slice(1);
   if (LEGALKEYS.includes(h)) { view = h; render(); }

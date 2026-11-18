@@ -435,3 +435,8 @@ body:not(.landing)::after { width: 320px; height: 320px; bottom: -80px; left: -1
 .foot-links a { color: var(--muted); text-decoration: underline; font-size: 0.9rem; }
 .foot-links.light a { color: #cfc4ee; }
 .legal .foot-links { margin-top: 28px; }
+
+/* ===== Account tools ===== */
+.acct { display: grid; gap: 10px; margin-top: 10px; }
+.notice.paused { margin: 10px 20px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+@media (min-width: 700px) { .notice.paused { margin: 10px 24px; } }
