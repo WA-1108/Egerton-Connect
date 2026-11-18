@@ -11,6 +11,7 @@ if (!window.supabase) {
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const GENDERS = [["woman", "Woman"], ["man", "Man"], ["nonbinary", "Non-binary"]];
+const INTEREST = { woman: "Women", man: "Men", nonbinary: "Non-binary people" };
 const ZONES = ["Egerton main campus", "Egerton area", "Njoro town", "Njoro, near the market", "Nakuru town", "Elsewhere nearby"];
 
 /* Sample profiles, shown only until real people join */
@@ -160,8 +161,8 @@ function welcomeView() {
       <div class="hero-in">
         <div class="hero-copy">
           <span class="pill reveal" style="--d:0s">For the whole Egerton community, 18+</span>
-          <h1 class="reveal" style="--d:.1s">Meet someone <em>around Egerton.</em></h1>
-          <p class="lead reveal" style="--d:.2s">Create a profile with a nickname and where you are. Browse people nearby and unlock their contact when you're ready.</p>
+          <h1 class="reveal" style="--d:.1s">Meet someone nearby, <em>privately.</em></h1>
+          <p class="lead reveal" style="--d:.2s">Join with just a nickname. Browse people around Egerton, and keep your number private until someone unlocks it.</p>
           <button class="btn sun big reveal" style="--d:.3s" data-act="start">Create my profile</button>
           <p class="fine reveal" style="--d:.4s">Free to join. Just 3 quick steps.</p>
         </div>
@@ -173,6 +174,11 @@ function welcomeView() {
         </div>
       </div>
     </section>
+    <section class="trust"><div class="trust-in">
+      <div><strong>Nicknames, not real names</strong><span>Profiles show a nickname and a general area.</span></div>
+      <div><strong>Private numbers</strong><span>Hidden until someone unlocks them.</span></div>
+      <div><strong>Adults only</strong><span>Everyone confirms they are 18 or older.</span></div>
+    </div></section>
     <section class="how">
       <h2>How it works</h2>
       <div class="steps3">
@@ -210,8 +216,8 @@ function formView() {
   const seeking = m.seeking || [];
   const chip = (type, name, g, on) => `<label class="chip"><input type="${type}" name="${name}" value="${g[0]}" ${on ? "checked" : ""} /><span>${g[1]}</span></label>`;
   const nameF = `<div class="field"><label for="name">Choose a nickname</label><input id="name" name="name" type="text" maxlength="30" autocomplete="off" placeholder="e.g. Sunrise" value="${esc(m.name || "")}" /><div class="hint">Shown to everyone, so please do not use your real name.</div></div>`;
-  const genderF = `<div class="field"><fieldset><legend>I am</legend><div class="chips">${GENDERS.map((g) => chip("radio", "gender", g, m.gender === g[0])).join("")}</div></fieldset></div>`;
-  const seekF = `<div class="field"><fieldset><legend>I want to meet</legend><div class="chips">${GENDERS.map((g) => chip("checkbox", "seeking", g, seeking.includes(g[0]))).join("")}</div><div class="hint">Pick one or more.</div></fieldset></div>`;
+  const genderF = `<div class="field"><fieldset><legend>Gender</legend><div class="chips">${GENDERS.map((g) => chip("radio", "gender", g, m.gender === g[0])).join("")}</div></fieldset></div>`;
+  const seekF = `<div class="field"><fieldset><legend>Interested in</legend><div class="chips">${GENDERS.map((g) => chip("checkbox", "seeking", [g[0], INTEREST[g[0]]], seeking.includes(g[0]))).join("")}</div><div class="hint">Pick one or more.</div></fieldset></div>`;
   const locF = `<div class="field"><label for="location">Current area</label><select id="location" name="location"><option value="">Choose an area</option>${ZONES.map((z) => `<option ${m.loc === z ? "selected" : ""}>${z}</option>`).join("")}</select><div class="hint">A general area only, so nobody can find your exact spot.</div></div>`;
   const bioF = `<div class="field"><label for="bio">About me <span class="hint">(optional)</span></label><textarea id="bio" name="bio" maxlength="200" placeholder="A line or two about you">${esc(m.bio || "")}</textarea></div>`;
   const intF = `<div class="field"><label for="interests">Interests <span class="hint">(optional)</span></label><input id="interests" name="interests" type="text" placeholder="Football, Movies, Coding" value="${esc((m.interests || []).join(", "))}" /><div class="hint">Separate with commas. Up to 4.</div></div>`;
@@ -264,18 +270,17 @@ function profileView() {
   return `<div class="topbar"><h2>My profile</h2></div>
   <div class="profile">
     <div class="card">${avatar(me)}<div class="body">
-      <h3>${esc(me.name)}</h3><p class="loc">Now in ${esc(me.loc)}</p>
-      <p class="meta">${esc(genderLabel(me.gender))}. Meeting: ${me.seeking.map(genderLabel).join(", ")}</p>
+      <h3>${esc(me.name)}</h3>
+      <dl class="facts">
+        <div><dt>Gender</dt><dd>${esc(genderLabel(me.gender))}</dd></div>
+        <div><dt>Interested in</dt><dd>${esc(me.seeking.map((g) => INTEREST[g]).join(", "))}</dd></div>
+        <div><dt>Current area</dt><dd>${esc(me.loc)}</dd></div>
+      </dl>
       ${me.bio ? `<p>${esc(me.bio)}</p>` : ""}
       <div class="tags">${me.interests.map((i) => `<span>${esc(i)}</span>`).join("")}</div>
       <p class="hint" style="margin-top:14px">Your contact (${esc(me.contact)}) stays hidden from others until they unlock it.</p>
     </div></div>
     <button class="btn" data-act="edit">Edit profile</button>
-    <div class="box"><h3>Stay safe</h3><ul>
-      <li>Meet in public places first.</li>
-      <li>Tell a friend where you are going.</li>
-      <li>Never send money to someone you met here.</li>
-      <li>Share only a general location, never your exact address.</li></ul></div>
     <button class="btn ghost" data-act="logout">Log out</button>
     <button class="btn danger" data-act="delete">Delete my profile</button>
   </div>`;
@@ -302,8 +307,8 @@ function unlockModal() {
 function validate(data, editing) {
   const digits = (data.get("contact") || "").toString().replace(/\D/g, "");
   if (!(data.get("name") || "").toString().trim()) return ["Choose a nickname.", 1];
-  if (!data.get("gender")) return ["Choose who you are.", 1];
-  if (!data.getAll("seeking").length) return ["Choose who you want to meet.", 1];
+  if (!data.get("gender")) return ["Choose your gender.", 1];
+  if (!data.getAll("seeking").length) return ["Choose who you are interested in.", 1];
   if (!(data.get("location") || "").toString().trim()) return ["Choose your current area.", 2];
   if (digits.length < 9) return ["Enter a valid phone number.", 3];
   if (!editing && !data.get("consent")) return ["Please confirm you are 18 or older.", 3];
