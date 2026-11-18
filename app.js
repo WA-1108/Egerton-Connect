@@ -48,6 +48,9 @@ const STEPS = 3;
 let unlockId = null;
 let notice = "";
 let busy = false;
+let photoList = [];
+let areaFilter = "all";
+let justJoined = false;
 
 const app = document.getElementById("app");
 const byId = (id) => PROFILES.find((p) => p.id === id);
@@ -66,6 +69,16 @@ function svgAvatar(p) {
 }
 PROFILES.forEach((p) => { p.photos = [svgAvatar(p)]; p.sample = true; });
 
+function stripHtml(urls, name) {
+  return `<div class="strip">${urls.map((u, i) => `<img class="photo" src="${esc(u)}" alt="Photo ${i + 1} of ${esc(name)}" loading="lazy" />`).join("")}</div>`;
+}
+const photoBlock = (p, blurred) => (p.sample ? photoOf(p, blurred) : p.photoUrls && p.photoUrls.length ? stripHtml(p.photoUrls, p.name) : avatar(p));
+const myPhotos = () => { const u = (me.blur ? me.blurUrls : me.clearUrls).filter(Boolean); return u.length ? stripHtml(u, me.name) : avatar(me); };
+
+function thumbsHtml() {
+  return photoList.map((x, i) => `<div class="th"><img src="${esc(x.preview)}" alt="Photo ${i + 1}" /><button type="button" data-act="rmphoto" data-i="${i}" aria-label="Remove photo ${i + 1}">&times;</button></div>`).join("");
+}
+
 function noticeHtml() {
   const n = notice;
   notice = "";
@@ -74,11 +87,31 @@ function noticeHtml() {
 
 /* ---------- Data ---------- */
 
+async function signUrls(paths) {
+  if (!paths.length) return [];
+  const { data } = await sb.storage.from("photos").createSignedUrls(paths, 3600);
+  return (data || []).map((d) => d.signedUrl || "");
+}
+
 async function loadMe() {
   const { data: p } = await sb.from("profiles").select("*").eq("id", user.id).maybeSingle();
   if (!p) { me = null; return; }
   const { data: c } = await sb.from("contacts").select("phone").eq("profile_id", user.id).maybeSingle();
-  me = { id: p.id, name: p.nickname, gender: p.gender, seeking: p.seeking, loc: p.area, bio: p.bio || "", interests: p.interests || [], contact: c ? c.phone : "" };
+  me = { id: p.id, name: p.nickname, gender: p.gender, seeking: p.seeking, loc: p.area, bio: p.bio || "", interests: p.interests || [], contact: c ? c.phone : "", blur: !!p.blur_photos, photos: p.photos || [] };
+  me.clearUrls = await signUrls(me.photos.map((n) => `${user.id}/${n}.jpg`));
+  me.blurUrls = await signUrls(me.photos.map((n) => `${user.id}/${n}-blur.jpg`));
+}
+
+async function signPeople(list) {
+  const paths = [];
+  list.forEach((p) => {
+    const ok = !p.blur || unlockedIds.has(p.id);
+    p.paths = p.photos.map((n) => `${p.id}/${n}${ok ? "" : "-blur"}.jpg`);
+    paths.push(...p.paths);
+  });
+  const urls = await signUrls(paths);
+  let i = 0;
+  list.forEach((p) => { p.photoUrls = p.paths.map(() => urls[i++] || "").filter(Boolean); });
 }
 
 async function getContact(id) {
@@ -87,11 +120,12 @@ async function getContact(id) {
 }
 
 async function loadPeople() {
-  const { data } = await sb.from("profiles").select("id,nickname,gender,area,bio,interests,blur_photos").neq("id", user.id).in("gender", me.seeking);
-  people = (data || []).map((r) => ({ id: r.id, name: r.nickname, gender: r.gender, loc: r.area, bio: r.bio || "", interests: r.interests || [], blur: r.blur_photos }));
+  const { data } = await sb.from("profiles").select("id,nickname,gender,area,bio,interests,blur_photos,photos").neq("id", user.id).in("gender", me.seeking);
+  people = (data || []).map((r) => ({ id: r.id, name: r.nickname, gender: r.gender, loc: r.area, bio: r.bio || "", interests: r.interests || [], blur: r.blur_photos, photos: r.photos || [] }));
   const u = await sb.from("unlocks").select("profile_id");
   unlockedIds = new Set((u.data || []).map((x) => x.profile_id));
   for (const id of unlockedIds) { if (!revealed[id]) revealed[id] = await getContact(id); }
+  await signPeople(people);
 }
 
 async function afterLogin() {
@@ -126,6 +160,16 @@ async function saveProfile(data, editing) {
   if (busy) return;
   busy = true;
   try {
+    const bucket = sb.storage.from("photos");
+    const keep = photoList.map((x) => x.name);
+    const removed = (me ? me.photos : []).filter((n) => !keep.includes(n));
+    for (const item of photoList.filter((x) => x.isNew)) {
+      const a = await bucket.upload(`${user.id}/${item.name}.jpg`, item.clear, { contentType: "image/jpeg", upsert: true });
+      const b = await bucket.upload(`${user.id}/${item.name}-blur.jpg`, item.blur, { contentType: "image/jpeg", upsert: true });
+      const bad = a.error || b.error;
+      if (bad) { showError("Could not upload a photo: " + bad.message); return; }
+    }
+    if (removed.length) await bucket.remove(removed.flatMap((n) => [`${user.id}/${n}.jpg`, `${user.id}/${n}-blur.jpg`]));
     const row = {
       id: user.id,
       nickname: data.get("name").toString().trim(),
@@ -133,7 +177,9 @@ async function saveProfile(data, editing) {
       seeking: data.getAll("seeking"),
       area: data.get("location").toString(),
       bio: (data.get("bio") || "").toString().trim(),
-      interests: (data.get("interests") || "").toString().split(",").map((s) => s.trim()).filter(Boolean).slice(0, 4),
+      interests: (data.get("interests") || "").toString().split(",").map((x) => x.trim()).filter(Boolean).slice(0, 4),
+      photos: keep,
+      blur_photos: !!data.get("blur"),
       adult_confirmed: true,
     };
     const r1 = await sb.from("profiles").upsert(row);
@@ -142,6 +188,7 @@ async function saveProfile(data, editing) {
     if (r2.error) { showError(r2.error.message); return; }
     await loadMe();
     await loadPeople();
+    if (!editing) justJoined = true;
     view = editing ? "profile" : "browse";
     render();
   } finally { busy = false; }
@@ -223,11 +270,13 @@ function formView() {
   const intF = `<div class="field"><label for="interests">Interests <span class="hint">(optional)</span></label><input id="interests" name="interests" type="text" placeholder="Football, Movies, Coding" value="${esc((m.interests || []).join(", "))}" /><div class="hint">Separate with commas. Up to 4.</div></div>`;
   const contactF = `<div class="field"><label for="contact">Phone or WhatsApp number</label><input id="contact" name="contact" type="tel" maxlength="20" placeholder="07XX XXX XXX" value="${esc(m.contact || "")}" /><div class="hint">Hidden from everyone until they unlock it.</div></div>`;
   const consentF = `<label class="check"><input type="checkbox" name="consent" /> <span>I am 18 or older and I will treat people with respect.</span></label>`;
+  const photoF = `<div class="field"><label for="photos">Photos <span class="hint">(optional, up to 3)</span></label><input id="photos" type="file" accept="image/*" multiple /><div class="thumbs" id="thumbs">${thumbsHtml()}</div><div class="hint">A blurred copy is made for you automatically.</div></div>`;
+  const blurF = `<label class="check"><input type="checkbox" name="blur" ${m.blur ? "checked" : ""} /> <span>Blur my photos until someone unlocks my contact.</span></label>`;
   const errBox = `<div class="error" id="formError" role="alert" hidden></div>`;
 
   if (editing) {
     return `<div class="topbar"><h2>Edit profile</h2></div>
-    <form class="form" data-form="profile" novalidate>${errBox}${nameF}${genderF}${seekF}${locF}${bioF}${intF}${contactF}
+    <form class="form" data-form="profile" novalidate>${errBox}${nameF}${genderF}${seekF}${locF}${bioF}${intF}${photoF}${blurF}${contactF}
       <button class="btn" type="submit">Save changes</button>
       <button class="btn ghost" type="button" data-act="nav" data-to="profile">Cancel</button></form>`;
   }
@@ -236,7 +285,7 @@ function formView() {
   <form class="form" data-form="profile" novalidate>${errBox}
     <section class="step" data-step="1"><h3 class="step-title">First, the basics</h3>${nameF}${genderF}${seekF}</section>
     <section class="step" data-step="2" hidden><h3 class="step-title">About you</h3>${locF}${bioF}${intF}</section>
-    <section class="step" data-step="3" hidden><h3 class="step-title">Contact</h3>${contactF}${consentF}</section>
+    <section class="step" data-step="3" hidden><h3 class="step-title">Photos and contact</h3>${photoF}${blurF}${contactF}${consentF}</section>
     <div class="step-nav">
       <button class="btn ghost" type="button" data-act="prev">Back</button>
       <button class="btn" type="button" id="nextBtn" data-act="next">Next</button>
@@ -245,31 +294,43 @@ function formView() {
   </form>`;
 }
 
-function cardHtml(p) {
+function cardHtml(p, i) {
   const open = p.sample ? sampleUnlocked.includes(p.id) : unlockedIds.has(p.id);
   const number = p.sample ? p.contact : revealed[p.id];
   const contact = open
     ? (number ? `<a class="contact" href="tel:${esc(tel(number))}">${esc(number)}</a>` : `<p class="hint">Contact unlocked.</p>`)
     : `<div class="lock"><span>${esc(mask(p.contact))}</span><button class="btn small sun" data-act="unlock" data-id="${esc(p.id)}">Unlock contact</button></div>`;
-  return `<article class="card">${photoOf(p, p.blur && !open)}<div class="body">
+  return `<article class="card" style="--i:${i || 0}">${photoBlock(p, p.blur && !open)}<div class="body">
     <h3>${esc(p.name)}</h3><p class="loc">Now in ${esc(p.loc)}</p>${p.blur && !open ? `<p class="hint">Photo is blurred until you unlock contact.</p>` : ""}
     ${p.bio ? `<p>${esc(p.bio)}</p>` : ""}
     <div class="tags">${(p.interests || []).map((i) => `<span>${esc(i)}</span>`).join("")}</div>${contact}</div></article>`;
 }
 
+function appHead() {
+  return `<header class="app-head"><button class="brandbtn" data-act="nav" data-to="welcome" aria-label="Back to the home page">Egerton Connect</button><button class="me-chip" data-act="nav" data-to="profile" aria-label="My profile">${avatar(me, "sm")}</button></header>`;
+}
+
 function browseView() {
   const samples = !people.length;
-  const list = samples ? PROFILES.filter((p) => me.seeking.includes(p.gender)) : people;
-  return `<div class="topbar"><h2>Browse</h2><span class="tag">18+</span></div>
+  let list = samples ? PROFILES.filter((p) => me.seeking.includes(p.gender)) : people;
+  if (areaFilter !== "all") list = list.filter((p) => p.loc === areaFilter);
+  const chips = ["all"].concat(ZONES).map((z) => `<button class="fchip" data-act="area" data-z="${esc(z)}" aria-pressed="${areaFilter === z}">${z === "all" ? "Everyone" : esc(z)}</button>`).join("");
+  const welcome = justJoined
+    ? `<div class="welcome-card"><div class="confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><h3>You're in, ${esc(me.name)}!</h3><p>Your profile is live. Have a look around, and unlock a contact when you find someone you like.</p><button class="btn sun small" data-act="closewelcome">Got it</button></div>`
+    : "";
+  return `${appHead()}
+    <section class="b-intro"><h2>Hi ${esc(me.name)}</h2><p>Here's who's around Egerton today.</p></section>
+    ${welcome}
     ${noticeHtml()}
+    <div class="fchips" role="group" aria-label="Filter by area">${chips}</div>
     ${samples ? `<p class="hint pad">Early preview: these are sample profiles until more people join.</p>` : ""}
-    ${list.length ? `<div class="cards">${list.map(cardHtml).join("")}</div>` : `<div class="empty"><h3>No profiles yet</h3><p>More people will appear as more members join.</p></div>`}`;
+    ${list.length ? `<div class="cards">${list.map(cardHtml).join("")}</div>` : `<div class="empty"><h3>No one here yet</h3><p>${areaFilter === "all" ? "More people will appear as more members join." : "Nobody is in this area right now. Try another area."}</p></div>`}`;
 }
 
 function profileView() {
-  return `<div class="topbar"><h2>My profile</h2></div>
+  return `${appHead()}<div class="topbar"><h2>My profile</h2></div>
   <div class="profile">
-    <div class="card">${avatar(me)}<div class="body">
+    <div class="card">${myPhotos()}<div class="body">
       <h3>${esc(me.name)}</h3>
       <dl class="facts">
         <div><dt>Gender</dt><dd>${esc(genderLabel(me.gender))}</dd></div>
@@ -280,6 +341,7 @@ function profileView() {
       <div class="tags">${me.interests.map((i) => `<span>${esc(i)}</span>`).join("")}</div>
       <p class="hint" style="margin-top:14px">Your contact (${esc(me.contact)}) stays hidden from others until they unlock it.</p>
     </div></div>
+    ${me.photos.length ? `<div class="box"><h3>Photo privacy</h3><p class="hint">${me.blur ? "Your photos are blurred. Others see them blurred until they unlock your contact." : "Your photos are visible to everyone browsing."}</p><button class="btn ${me.blur ? "sun" : "ghost"}" data-act="toggleblur">${me.blur ? "Show my photos" : "Blur my photos"}</button></div>` : ""}
     <button class="btn" data-act="edit">Edit profile</button>
     <button class="btn ghost" data-act="logout">Log out</button>
     <button class="btn danger" data-act="delete">Delete my profile</button>
@@ -343,6 +405,36 @@ function stepNav(dir) {
   showStep(step + 1);
 }
 
+const toBlob = (c) => new Promise((res) => c.toBlob(res, "image/jpeg", 0.78));
+
+function readImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+async function processPhoto(file) {
+  const img = await readImage(file);
+  const r = Math.min(1, 720 / Math.max(img.width, img.height));
+  const w = Math.round(img.width * r);
+  const h = Math.round(img.height * r);
+  const canvas = (cw, ch) => { const c = document.createElement("canvas"); c.width = Math.max(1, cw); c.height = Math.max(1, ch); return c; };
+  const clear = canvas(w, h);
+  clear.getContext("2d").drawImage(img, 0, 0, w, h);
+  const tiny = canvas(Math.round(w / 26), Math.round(h / 26));
+  tiny.getContext("2d").drawImage(clear, 0, 0, tiny.width, tiny.height);
+  const blur = canvas(w, h);
+  const bx = blur.getContext("2d");
+  bx.imageSmoothingEnabled = true;
+  bx.imageSmoothingQuality = "high";
+  bx.drawImage(tiny, 0, 0, w, h);
+  return { clear: await toBlob(clear), blur: await toBlob(blur), preview: clear.toDataURL("image/jpeg", 0.6) };
+}
+
 /* ---------- Render ---------- */
 
 function render() {
@@ -365,13 +457,21 @@ function render() {
 const actions = {
   start: () => {
     step = 1;
+    photoList = [];
     if (user) view = me ? "browse" : "create";
     else { authMode = "signup"; view = "auth"; }
   },
+  area: (d) => { areaFilter = d.z; },
+  closewelcome: () => { justJoined = false; },
   tologin: () => { authMode = "login"; view = "auth"; },
   tosignup: () => { authMode = "signup"; view = "auth"; },
   nav: (d) => { view = d.to; },
-  edit: () => { view = "edit"; },
+  edit: () => { view = "edit"; photoList = me.photos.map((n, i) => ({ name: n, preview: me.clearUrls[i] || "" })); },
+  toggleblur: async () => {
+    const { error } = await sb.from("profiles").update({ blur_photos: !me.blur }).eq("id", user.id);
+    if (error) { notice = "Could not update: " + error.message; return; }
+    me.blur = !me.blur;
+  },
   unlock: (d) => { unlockId = d.id; },
   closeunlock: () => { unlockId = null; },
   confirmunlock: async () => {
@@ -387,6 +487,7 @@ const actions = {
     if (error) { notice = "Could not unlock: " + error.message; return; }
     unlockedIds.add(id);
     revealed[id] = await getContact(id);
+    await signPeople([real]);
   },
   logout: async () => {
     await sb.auth.signOut();
@@ -395,6 +496,7 @@ const actions = {
   },
   delete: async () => {
     if (!confirm("Delete your profile and contact number? Your login email stays until you ask us to remove it.")) return;
+    if (me.photos.length) await sb.storage.from("photos").remove(me.photos.flatMap((n) => [`${user.id}/${n}.jpg`, `${user.id}/${n}-blur.jpg`]));
     const { error } = await sb.from("profiles").delete().eq("id", user.id);
     if (error) { notice = "Could not delete: " + error.message; return; }
     await sb.auth.signOut();
@@ -408,8 +510,21 @@ app.addEventListener("click", (e) => {
   if (!el) return;
   const act = el.dataset.act;
   if (act === "next" || act === "prev") { stepNav(act); return; }
+  if (act === "rmphoto") { photoList.splice(Number(el.dataset.i), 1); document.getElementById("thumbs").innerHTML = thumbsHtml(); return; }
   if (!actions[act]) return;
   Promise.resolve(actions[act](el.dataset)).then(render);
+});
+
+app.addEventListener("change", async (e) => {
+  if (e.target.id !== "photos") return;
+  const files = Array.from(e.target.files);
+  e.target.value = "";
+  for (const f of files) {
+    if (photoList.length >= 3) break;
+    try { photoList.push({ name: Math.random().toString(36).slice(2, 10), isNew: true, ...(await processPhoto(f)) }); } catch (err) { /* skip unreadable file */ }
+    const box = document.getElementById("thumbs");
+    if (box) box.innerHTML = thumbsHtml();
+  }
 });
 
 app.addEventListener("submit", async (e) => {
