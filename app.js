@@ -40,13 +40,24 @@ try { sampleUnlocked = JSON.parse(localStorage.getItem(SKEY)) || []; } catch (e)
 let user = null;
 let me = null;
 let people = [];
-let unlockedIds = new Set();
+let viewedIds = new Set();
 let revealed = {};
 let view = "welcome";
 let authMode = "signup";
 let step = 1;
 const STEPS = 3;
-let unlockId = null;
+let status = { payments_enabled: false, weekly_price: 99, monthly_price: 399, daily_view_limit: 30, has_access: true, access_until: null };
+let payOpen = false;
+let payPlan = "weekly";
+let payWaiting = false;
+let payError = "";
+let chats = [];
+let activeChat = null;
+let chatMsgs = [];
+let chatStatusShown = "";
+let sayHiId = null;
+let reportConv = null;
+let channel = null;
 let notice = "";
 let busy = false;
 let photoList = [];
@@ -122,13 +133,18 @@ async function loadMe() {
 async function signPeople(list) {
   const paths = [];
   list.forEach((p) => {
-    const ok = !p.blur || unlockedIds.has(p.id);
+    const ok = !p.blur || viewedIds.has(p.id);
     p.paths = p.photos.map((n) => `${p.id}/${n}${ok ? "" : "-blur"}.jpg`);
     paths.push(...p.paths);
   });
   const urls = await signUrls(paths);
   let i = 0;
   list.forEach((p) => { p.photoUrls = p.paths.map(() => urls[i++] || "").filter(Boolean); });
+}
+
+async function loadStatus() {
+  const { data } = await sb.rpc("get_app_status");
+  if (data) status = data;
 }
 
 async function getContact(id) {
@@ -139,17 +155,17 @@ async function getContact(id) {
 async function loadPeople() {
   const { data } = await sb.from("profiles").select("id,nickname,gender,area,bio,interests,blur_photos,photos").neq("id", user.id).in("gender", me.seeking);
   people = (data || []).map((r) => ({ id: r.id, name: r.nickname, gender: r.gender, loc: r.area, bio: r.bio || "", interests: r.interests || [], blur: r.blur_photos, photos: r.photos || [] }));
-  const u = await sb.from("unlocks").select("profile_id");
-  unlockedIds = new Set((u.data || []).map((x) => x.profile_id));
+  const u = await sb.from("contact_views").select("profile_id");
+  viewedIds = new Set((u.data || []).map((x) => x.profile_id));
   const bl = await sb.from("blocks").select("blocked_id,blocked_name");
   blockedList = (bl.data || []).map((x) => ({ id: x.blocked_id, name: x.blocked_name }));
-  for (const id of unlockedIds) { if (!revealed[id]) revealed[id] = await getContact(id); }
   await signPeople(people);
 }
 
 async function afterLogin() {
+  await loadStatus();
   await loadMe();
-  if (me) { await loadPeople(); view = "browse"; } else { view = "create"; }
+  if (me) { await loadPeople(); await loadChats(); startRealtime(); view = "browse"; } else { view = "create"; }
   step = 1;
 }
 
@@ -228,21 +244,21 @@ function welcomeView() {
         <div class="hero-copy">
           <span class="pill reveal" style="--d:0s">For the whole Egerton community, 18+</span>
           <h1 class="reveal" style="--d:.1s">Meet someone nearby, <em>privately.</em></h1>
-          <p class="lead reveal" style="--d:.2s">Join with just a nickname. Browse people around Egerton, and keep your number private until someone unlocks it.</p>
+          <p class="lead reveal" style="--d:.2s">Join with just a nickname. Browse people around Egerton. Numbers are only shown to members with a plan.</p>
           <button class="btn sun big reveal" style="--d:.3s" data-act="start">Create my profile</button>
           <p class="fine reveal" style="--d:.4s">Free to join. Just 3 quick steps.</p>
         </div>
         <div class="hero-art reveal" style="--d:.35s" aria-hidden="true">
           ${mini("p1", "Now in Njoro town")}
           ${mini("p2", "Now at Egerton main campus")}
-          <div class="fc fc-match"><strong>Contact unlocked</strong></div>
+          <div class="fc fc-match"><strong>Contact shown</strong></div>
           ${mini("p7", "Now in Nakuru town")}
         </div>
       </div>
     </section>
     <section class="trust"><div class="trust-in">
       <div><strong>Nicknames, not real names</strong><span>Profiles show a nickname and a general area.</span></div>
-      <div><strong>Private numbers</strong><span>Hidden until someone unlocks them.</span></div>
+      <div><strong>Private numbers</strong><span>Only shown to members with an active plan.</span></div>
       <div><strong>Adults only</strong><span>Everyone confirms they are 18 or older.</span></div>
     </div></section>
     <section class="how">
@@ -250,7 +266,7 @@ function welcomeView() {
       <div class="steps3">
         <div class="how-card"><span class="num">1</span><h3>Create your profile</h3><p>Pick a nickname, your area and a few words about you.</p></div>
         <div class="how-card"><span class="num">2</span><h3>Browse people</h3><p>See who is around Egerton and read their profiles.</p></div>
-        <div class="how-card"><span class="num">3</span><h3>Unlock contact</h3><p>Found someone you like? Unlock their contact and reach out yourself.</p></div>
+        <div class="how-card"><span class="num">3</span><h3>Start talking</h3><p>Send a chat request. Once they accept, chat right here. A plan also shows contact numbers.</p></div>
       </div>
     </section>
     <section class="final">
@@ -289,10 +305,10 @@ function formView() {
   const locF = `<div class="field"><label for="location">Current area</label><select id="location" name="location"><option value="">Choose an area</option>${ZONES.map((z) => `<option ${m.loc === z ? "selected" : ""}>${z}</option>`).join("")}</select><div class="hint">A general area only, so nobody can find your exact spot.</div></div>`;
   const bioF = `<div class="field"><label for="bio">About me <span class="hint">(optional)</span></label><textarea id="bio" name="bio" maxlength="200" placeholder="A line or two about you">${esc(m.bio || "")}</textarea></div>`;
   const intF = `<div class="field"><label for="interests">Interests <span class="hint">(optional)</span></label><input id="interests" name="interests" type="text" placeholder="Football, Movies, Coding" value="${esc((m.interests || []).join(", "))}" /><div class="hint">Separate with commas. Up to 4.</div></div>`;
-  const contactF = `<div class="field"><label for="contact">Phone or WhatsApp number</label><input id="contact" name="contact" type="tel" maxlength="20" placeholder="07XX XXX XXX" value="${esc(m.contact || "")}" /><div class="hint">Hidden from everyone until they unlock it.</div></div>`;
+  const contactF = `<div class="field"><label for="contact">Phone or WhatsApp number</label><input id="contact" name="contact" type="tel" maxlength="20" placeholder="07XX XXX XXX" value="${esc(m.contact || "")}" /><div class="hint">Only shown to members with an active plan.</div></div>`;
   const consentF = `<label class="check"><input type="checkbox" name="consent" /> <span>I am 18 or older, I agree to the <a href="#terms" target="_blank" rel="noopener">Terms</a> and <a href="#privacy" target="_blank" rel="noopener">Privacy Policy</a>, and I will treat people with respect.</span></label>`;
   const photoF = `<div class="field"><label for="photos">Photos <span class="hint">(optional, up to 3)</span></label><input id="photos" type="file" accept="image/*" multiple /><div class="thumbs" id="thumbs">${thumbsHtml()}</div><div class="hint">A blurred copy is made for you automatically.</div></div>`;
-  const blurF = `<label class="check"><input type="checkbox" name="blur" ${m.blur ? "checked" : ""} /> <span>Blur my photos until someone unlocks my contact.</span></label>`;
+  const blurF = `<label class="check"><input type="checkbox" name="blur" ${m.blur ? "checked" : ""} /> <span>Blur my photos until a member views my contact number.</span></label>`;
   const errBox = `<div class="error" id="formError" role="alert" hidden></div>`;
 
   if (editing) {
@@ -318,29 +334,37 @@ function formView() {
 const HEART = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
 
 function cardHtml(p, i) {
-  const open = p.sample ? sampleUnlocked.includes(p.id) : unlockedIds.has(p.id);
-  const number = p.sample ? p.contact : revealed[p.id];
-  const contact = open
-    ? (number ? `<a class="contact" href="tel:${esc(tel(number))}">${esc(number)}</a>` : `<p class="hint">Contact unlocked.</p>`)
-    : `<div class="lock"><span>${esc(mask(p.contact))}</span><button class="btn small sun" data-act="unlock" data-id="${esc(p.id)}">Unlock contact</button></div>`;
+  const open = p.sample ? sampleUnlocked.includes(p.id) : viewedIds.has(p.id);
+  const number = p.sample ? (open ? p.contact : "") : revealed[p.id];
+  const contact = number
+    ? `<a class="contact" href="tel:${esc(tel(number))}">${esc(number)}</a>`
+    : status.has_access
+      ? `<div class="lock"><span>${esc(mask(p.contact))}</span><button class="btn small sun" data-act="reveal" data-id="${esc(p.id)}">Show number</button></div>`
+      : `<div class="lock"><span>${esc(mask(p.contact))}</span><button class="btn small sun" data-act="nav" data-to="plans">Get access</button></div>`;
+  const conv = chats.find((c) => c.other_id === p.id);
+  const hi = p.sample || (conv && conv.status === "declined") ? ""
+    : conv ? `<button class="btn small ghost hibtn" data-act="openchat" data-id="${esc(p.id)}">${conv.status === "accepted" ? "Open chat" : conv.initiated_by_me ? "Request sent" : "Reply"}</button>`
+    : `<button class="btn small hibtn" data-act="sayhi" data-id="${esc(p.id)}">Say hi</button>`;
   const saved = savedIds.has(p.id);
   return `<article class="card" style="--i:${i || 0}">
     <div class="media">${photoBlock(p, p.blur && !open)}
       <button class="heart${saved ? " on" : ""}" data-act="save" data-id="${esc(p.id)}" aria-pressed="${saved}" aria-label="Save ${esc(p.name)}">${HEART}</button>
       <div class="cap"><h3>${esc(p.name)}</h3><span class="loc">Now in ${esc(p.loc)}</span></div>
     </div>
-    <div class="body">${p.blur && !open ? `<p class="hint">Photo is blurred until you unlock contact.</p>` : ""}
+    <div class="body">${p.blur && !open ? `<p class="hint">Photo is blurred until you view their number.</p>` : ""}
       ${p.bio ? `<p>${esc(p.bio)}</p>` : ""}
-      <div class="tags">${(p.interests || []).map((x) => `<span>${esc(x)}</span>`).join("")}</div>${contact}<button class="reportlink" data-act="report" data-id="${esc(p.id)}">Report or block</button></div></article>`;
+      <div class="tags">${(p.interests || []).map((x) => `<span>${esc(x)}</span>`).join("")}</div>${hi}${contact}<button class="reportlink" data-act="report" data-id="${esc(p.id)}">Report or block</button></div></article>`;
 }
 
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; };
 const baseList = () => (people.length ? people : PROFILES.filter((p) => me.seeking.includes(p.gender))).filter((p) => !hiddenIds.has(p.id));
 
 function appHead() {
-  const tab = (to, label) => `<button data-act="nav" data-to="${to}" ${view === to ? 'aria-current="page"' : ""}>${label}</button>`;
+  const n = unreadTotal();
+  const tab = (to, label, extra) => `<button data-act="nav" data-to="${to}" ${view === to ? 'aria-current="page"' : ""}>${label}${extra || ""}</button>`;
+  const badge = `<span class="badge chatbadge" ${n ? "" : "hidden"}>${n}</span>`;
   return `<header class="app-head"><button class="brandbtn" data-act="nav" data-to="welcome" aria-label="Back to the home page">Egerton Connect</button>
-    <nav class="topnav" aria-label="Main">${tab("browse", "Browse")}${tab("saved", "Saved")}${tab("profile", "My profile")}</nav>
+    <nav class="topnav" aria-label="Main">${tab("browse", "Browse")}${tab("saved", "Saved")}${tab("chats", "Chats", badge)}${tab("plans", "Plans")}${tab("profile", "My profile")}</nav>
     <button class="me-chip" data-act="nav" data-to="profile" aria-label="My profile">${avatar(me, "sm")}</button></header>`;
 }
 
@@ -386,7 +410,7 @@ function browseView() {
   const achips = ["all"].concat(ZONES).map((z) => `<button class="fchip" data-act="area" data-z="${esc(z)}" aria-pressed="${areaFilter === z}">${z === "all" ? "Everyone" : esc(z)}</button>`).join("");
   const ichips = ["all"].concat(top).map((x) => `<button class="fchip alt" data-act="interest" data-i="${esc(x)}" aria-pressed="${interestFilter === x}">${x === "all" ? "All interests" : esc(x)}</button>`).join("");
   const welcome = justJoined
-    ? `<div class="welcome-card"><div class="confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><h3>You're in, ${esc(me.name)}!</h3><p>Your profile is live. Have a look around, and unlock a contact when you find someone you like.</p><button class="btn sun small" data-act="closewelcome">Got it</button></div>`
+    ? `<div class="welcome-card"><div class="confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><h3>You're in, ${esc(me.name)}!</h3><p>Your profile is live. Have a look around, and view a contact number when you find someone you like.</p><button class="btn sun small" data-act="closewelcome">Got it</button></div>`
     : "";
   return `${appHead()}
     <section class="b-hero">
@@ -397,6 +421,7 @@ function browseView() {
       <div class="fchips" role="group" aria-label="Filter by area">${achips}</div>
     </section>
     ${me.paused ? `<div class="notice paused"><span>Your profile is paused, so nobody can see it.</span><button class="btn sun small" data-act="togglepause">Show it again</button></div>` : ""}
+    ${!status.payments_enabled ? `<p class="notice freebar">Free preview: contact numbers are open to all members while we test. Paid plans start later.</p>` : status.has_access ? "" : `<div class="notice paused"><span>Get a plan to see contact numbers.</span><button class="btn sun small" data-act="nav" data-to="plans">See plans</button></div>`}
     ${welcome}${noticeHtml()}${completeCard()}
     <section class="interests"><h3>Browse by interest</h3><div class="fchips" role="group" aria-label="Filter by interest">${ichips}</div></section>
     ${!people.length ? `<p class="hint pad">Early preview: these are sample profiles until more people join.</p>` : ""}
@@ -425,11 +450,12 @@ function profileView() {
       </dl>
       ${me.bio ? `<p>${esc(me.bio)}</p>` : ""}
       <div class="tags">${me.interests.map((i) => `<span>${esc(i)}</span>`).join("")}</div>
-      <p class="hint" style="margin-top:14px">Your contact (${esc(me.contact)}) stays hidden from others until they unlock it.</p>
+      <p class="hint" style="margin-top:14px">Your number (${esc(me.contact)}) is only shown to members with an active plan.</p>
     </div></div>
-    ${me.photos.length ? `<div class="box"><h3>Photo privacy</h3><p class="hint">${me.blur ? "Your photos are blurred. Others see them blurred until they unlock your contact." : "Your photos are visible to everyone browsing."}</p><button class="btn ${me.blur ? "sun" : "ghost"}" data-act="toggleblur">${me.blur ? "Show my photos" : "Blur my photos"}</button></div>` : ""}
+    ${me.photos.length ? `<div class="box"><h3>Photo privacy</h3><p class="hint">${me.blur ? "Your photos are blurred. Others see them blurred until they view your contact number." : "Your photos are visible to everyone browsing."}</p><button class="btn ${me.blur ? "sun" : "ghost"}" data-act="toggleblur">${me.blur ? "Show my photos" : "Blur my photos"}</button></div>` : ""}
     <button class="btn" data-act="edit">Edit profile</button>
-    <div class="box"><h3>Profile visibility</h3><p class="hint">${me.paused ? "Your profile is paused. Nobody can see it or unlock your contact." : "Your profile is visible to other members."}</p><button class="btn ${me.paused ? "sun" : "ghost"}" data-act="togglepause">${me.paused ? "Show my profile again" : "Pause my profile"}</button></div>
+    <div class="box"><h3>Membership</h3><p class="hint">${!status.payments_enabled ? "Free during testing." : status.has_access && status.access_until ? "Active until " + fmtDate(status.access_until) + "." : "No active plan."}</p><button class="btn ghost" data-act="nav" data-to="plans">See plans</button></div>
+    <div class="box"><h3>Profile visibility</h3><p class="hint">${me.paused ? "Your profile is paused. Nobody can see it or your contact number." : "Your profile is visible to other members."}</p><button class="btn ${me.paused ? "sun" : "ghost"}" data-act="togglepause">${me.paused ? "Show my profile again" : "Pause my profile"}</button></div>
     <div class="box"><h3>Account</h3><p class="hint">Signed in as ${esc(user.email)}. Only you can see this.</p><div class="acct"><button class="btn ghost" data-act="changepw">Change password</button><button class="btn ghost" data-act="exportdata">Download my data</button></div></div>
     ${blockedList.length ? `<div class="box"><h3>Blocked people</h3>${blockedList.map((b) => `<div class="blk"><span>${esc(b.name)}</span><button class="btn small ghost" data-act="unblock" data-id="${esc(b.id)}">Unblock</button></div>`).join("")}</div>` : ""}
     <button class="btn ghost" data-act="logout">Log out</button>
@@ -438,19 +464,219 @@ function profileView() {
 }
 
 function navView() {
-  const tab = (to, label) => `<button data-act="nav" data-to="${to}" ${view === to ? 'aria-current="page"' : ""}>${label}</button>`;
-  return `<nav class="nav" aria-label="Main">${tab("browse", "Browse")}${tab("saved", "Saved")}${tab("profile", "My profile")}</nav>`;
+  const n = unreadTotal();
+  const tab = (to, label, extra) => `<button data-act="nav" data-to="${to}" ${view === to ? 'aria-current="page"' : ""}>${label}${extra || ""}</button>`;
+  const badge = `<span class="badge chatbadge" ${n ? "" : "hidden"}>${n}</span>`;
+  return `<nav class="nav" aria-label="Main">${tab("browse", "Browse")}${tab("chats", "Chats", badge)}${tab("saved", "Saved")}${tab("profile", "My profile")}</nav>`;
 }
 
-function unlockModal() {
-  if (!unlockId) return "";
-  const p = byId(unlockId) || people.find((x) => x.id === unlockId);
+/* ---------- Chat ---------- */
+
+const unreadTotal = () => chats.reduce((n, c) => n + (c.status === "pending" && !c.initiated_by_me ? 1 : c.unread || 0), 0);
+
+function updateBadges() {
+  const n = unreadTotal();
+  document.querySelectorAll(".chatbadge").forEach((el) => { el.textContent = n; el.hidden = n === 0; });
+}
+
+async function loadChats() {
+  const { data } = await sb.rpc("my_chats");
+  chats = data || [];
+  updateBadges();
+}
+
+async function loadMessages() {
+  const { data } = await sb.from("messages").select("id,sender_id,body,created_at").eq("conversation_id", activeChat).order("id", { ascending: true }).limit(300);
+  chatMsgs = data || [];
+}
+
+async function markRead() {
+  if (!activeChat) return;
+  await sb.rpc("mark_read", { conv: activeChat });
+  await loadChats();
+}
+
+async function openChat(cid) {
+  if (!cid) return;
+  activeChat = cid;
+  sayHiId = null;
+  view = "chat";
+  await loadMessages();
+  await markRead();
+}
+
+function chatError(e) {
+  const m = (e && e.message) || "";
+  if (m.includes("plan_required")) return "Starting a chat needs a plan. Replying to a request is always free.";
+  if (m.includes("daily_limit")) return "You have reached today's limit of new chat requests. Try again tomorrow.";
+  if (m.includes("declined")) return "This person has declined, so you cannot message them.";
+  if (m.includes("already_sent")) return "You already sent a request. Please wait for a reply.";
+  if (m.includes("slow_down")) return "You are sending messages too fast. Please wait a moment.";
+  if (m.includes("bad_message")) return "Your message is empty or too long.";
+  return "Could not do that right now. Please try again.";
+}
+
+const msgsHtml = () => chatMsgs.map((m) => `<div class="msg ${m.sender_id === user.id ? "me" : "them"}">${esc(m.body)}</div>`).join("");
+
+function updateMsgsDom() {
+  const box = document.getElementById("msgs");
+  if (!box) return;
+  box.innerHTML = msgsHtml();
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
+function chatsView() {
+  const incoming = chats.filter((c) => c.status === "pending" && !c.initiated_by_me);
+  const active = chats.filter((c) => c.status === "accepted");
+  const sent = chats.filter((c) => c.status === "pending" && c.initiated_by_me);
+  const row = (c, line) => `<button class="item" data-act="openchat" data-cid="${esc(c.id)}">${avatar({ id: c.other_id, name: c.other_name }, "sm")}<div><strong>${esc(c.other_name)}${c.unread ? ` <span class="badge">${c.unread}</span>` : ""}</strong><span class="sub">${esc(line || c.last_body || "")}</span></div></button>`;
+  const section = (title, list, line) => (list.length ? `<h3 class="sec">${title}</h3><div class="list">${list.map((c) => row(c, line)).join("")}</div>` : "");
+  const empty = !incoming.length && !active.length && !sent.length;
+  return `${appHead()}${noticeHtml()}
+    <section class="b-hero slim"><h2>Chats</h2><p>Message people once they accept your request.</p></section>
+    ${section("Requests", incoming)}${section("Chats", active)}${section("Waiting for a reply", sent, "Request sent")}
+    ${empty ? `<div class="empty"><h3>No chats yet</h3><p>Tap Say hi on a profile to send a request.</p><button class="btn ghost" data-act="nav" data-to="browse">Browse profiles</button></div>` : ""}
+    ${footerHtml()}`;
+}
+
+function chatView() {
+  const c = chats.find((x) => x.id === activeChat);
+  if (!c) return `${appHead()}<div class="empty"><h3>Chat not found</h3><button class="btn ghost" data-act="nav" data-to="chats">Back to chats</button></div>`;
+  chatStatusShown = c.status;
+  const incoming = c.status === "pending" && !c.initiated_by_me;
+  const note = incoming
+    ? `<div class="req-actions"><p class="hint">${esc(c.other_name)} would like to chat. You can accept, decline or block.</p><button class="btn sun" data-act="accept">Accept</button><button class="btn ghost" data-act="decline">Decline</button></div>`
+    : c.status === "pending" ? `<p class="hint pad">Waiting for ${esc(c.other_name)} to accept. You can send more messages once they do.</p>`
+    : c.status === "declined" ? `<p class="hint pad">${esc(c.other_name)} declined this request.</p>` : "";
+  const composer = c.status === "accepted"
+    ? `<form class="composer" data-form="chat" autocomplete="off"><input name="text" type="text" maxlength="1000" placeholder="Write a message" aria-label="Message" /><button class="btn" type="submit">Send</button></form>` : "";
+  return `<div class="chatwrap">
+    <div class="chat-head"><button class="back" data-act="nav" data-to="chats" aria-label="Back to chats">&larr;</button>${avatar({ id: c.other_id, name: c.other_name }, "sm")}<strong>${esc(c.other_name)}</strong>
+      <span class="chat-menu"><button class="link" data-act="reportchat">Report</button><button class="link" data-act="blockchat">Block</button></span></div>
+    ${noticeHtml()}
+    <div class="msgs" id="msgs">${msgsHtml()}</div>${note}${composer}</div>`;
+}
+
+function sayHiModal() {
+  if (!sayHiId) return "";
+  const p = findPerson(sayHiId);
   if (!p) return "";
-  return `<div class="overlay" role="dialog" aria-modal="true" aria-label="Unlock contact"><div class="modal">
-    ${avatar(p, "sm")}<h2>Unlock ${esc(p.name)}'s contact</h2>
-    <p>In the live version, contact access will be a paid feature. Payments are not switched on in this preview, so you can unlock for free.</p>
-    <button class="btn sun" data-act="confirmunlock">Unlock (demo)</button>
-    <button class="btn ghost" data-act="closeunlock">Not now</button></div></div>`;
+  return `<div class="overlay" role="dialog" aria-modal="true" aria-label="Say hi"><form class="modal report" data-form="sayhi">
+    <h2>Say hi to ${esc(p.name)}</h2>
+    <p class="hint">Send one short message. ${esc(p.name)} can accept, decline or block, and you can chat once they accept.</p>
+    <div class="error" id="hiError" role="alert" hidden></div>
+    <textarea name="text" maxlength="300" placeholder="Hi! I liked your profile..."></textarea>
+    <button class="btn sun" type="submit">Send request</button>
+    <button class="btn ghost" type="button" data-act="closesayhi">Cancel</button></form></div>`;
+}
+
+async function sendSayHi(data) {
+  const text = (data.get("text") || "").toString().trim();
+  const box = document.getElementById("hiError");
+  const fail = (m) => { box.textContent = m; box.hidden = false; };
+  if (!text) { fail("Write a short hello first."); return; }
+  if (busy) return;
+  busy = true;
+  try {
+    const { data: cid, error } = await sb.rpc("start_chat", { target: sayHiId, first_message: text });
+    if (error) {
+      if (error.message.includes("plan_required")) { sayHiId = null; notice = chatError(error); view = "plans"; render(); return; }
+      fail(chatError(error));
+      return;
+    }
+    await loadChats();
+    await openChat(cid);
+    render();
+  } finally { busy = false; }
+}
+
+async function onChatEvent() {
+  if (!user || !me) return;
+  await loadChats();
+  if (view === "chats") { render(true); return; }
+  if (view === "chat") {
+    const before = chatMsgs.length;
+    await loadMessages();
+    updateMsgsDom();
+    if (chatMsgs.length > before) await markRead();
+    const c = chats.find((x) => x.id === activeChat);
+    if (c && c.status !== chatStatusShown) render(true);
+  }
+}
+
+function startRealtime() {
+  if (channel || !user) return;
+  channel = sb.channel("chat-updates")
+    .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, onChatEvent)
+    .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, onChatEvent)
+    .subscribe();
+}
+
+/* ---------- Plans and payments ---------- */
+
+const money = (n) => "KSh " + Number(n).toLocaleString("en-KE");
+const fmtDate = (d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
+function plansView() {
+  const free = !status.payments_enabled;
+  const plan = (key, title, price, days) => `<div class="plan${key === "monthly" ? " best" : ""}">
+    <h3>${title}</h3><p class="price">${money(price)}</p><p class="hint">${days} days, about ${money(Math.round(price / days))} a day</p>
+    <ul><li>See every member's contact number</li><li>Up to ${status.daily_view_limit} numbers a day</li><li>Pay with M-Pesa, no auto-renewal</li></ul>
+    <button class="btn ${key === "monthly" ? "sun" : ""}" data-act="choosepay" data-plan="${key}" ${free ? "disabled" : ""}>${free ? "Free during testing" : "Choose " + title.toLowerCase()}</button></div>`;
+  const lead = free ? "Everything is free while we test. Paid plans start later."
+    : status.has_access && status.access_until ? "Your access is active until " + fmtDate(status.access_until) + "."
+    : "Pick a plan to see contact numbers.";
+  return `${appHead()}${noticeHtml()}
+    <section class="b-hero slim"><h2>Plans</h2><p>${lead}</p></section>
+    <div class="plans">${plan("weekly", "Weekly", status.weekly_price, 7)}${plan("monthly", "Monthly", status.monthly_price, 30)}</div>
+    <p class="hint pad">You pay with M-Pesa: a prompt appears on your phone and you enter your PIN. Plans do not renew by themselves.</p>
+    ${footerHtml()}`;
+}
+
+function payModal() {
+  if (!payOpen) return "";
+  const price = payPlan === "weekly" ? status.weekly_price : status.monthly_price;
+  const name = payPlan === "weekly" ? "Weekly plan" : "Monthly plan";
+  if (payWaiting) {
+    return `<div class="overlay" role="dialog" aria-modal="true" aria-label="Waiting for payment"><div class="modal"><h2>Check your phone</h2><p>Enter your M-Pesa PIN to pay ${money(price)}. This page updates by itself when the payment arrives.</p><button class="btn ghost" data-act="closepay">Close</button></div></div>`;
+  }
+  return `<div class="overlay" role="dialog" aria-modal="true" aria-label="Pay with M-Pesa"><form class="modal report" data-form="pay">
+    <h2>${name}: ${money(price)}</h2>
+    ${payError ? `<div class="error" role="alert">${esc(payError)}</div>` : ""}
+    <div class="field"><label for="payphone">M-Pesa number</label><input id="payphone" name="phone" type="tel" placeholder="07XX XXX XXX" value="${esc(me ? me.contact : "")}" /><div class="hint">You will get a payment prompt on this phone.</div></div>
+    <button class="btn sun" type="submit">Send M-Pesa prompt</button>
+    <button class="btn ghost" type="button" data-act="closepay">Cancel</button></form></div>`;
+}
+
+async function startPayment(data) {
+  if (busy) return;
+  busy = true;
+  try {
+    const { data: r, error } = await sb.functions.invoke("pay-start", { body: { plan: payPlan, phone: (data.get("phone") || "").toString() } });
+    if (error || !r || !r.ok) { payError = (r && r.error) || "Could not start the payment. Please try again."; render(); return; }
+    payError = "";
+    payWaiting = true;
+    render();
+    pollPayment(r.paymentId);
+  } finally { busy = false; }
+}
+
+async function pollPayment(id) {
+  for (let i = 0; i < 30; i++) {
+    await new Promise((res) => setTimeout(res, 3000));
+    const { data } = await sb.from("payments").select("status").eq("id", id).maybeSingle();
+    if (data && data.status === "paid") {
+      await loadStatus();
+      payOpen = false; payWaiting = false;
+      notice = "Payment received. Your access is active.";
+      render();
+      return;
+    }
+    if (data && data.status === "failed") { payWaiting = false; payError = "The payment was not completed."; render(); return; }
+  }
+  payWaiting = false;
+  payError = "We have not received a confirmation yet. If money was taken, your access will switch on shortly.";
+  render();
 }
 
 /* ---------- Password ---------- */
@@ -487,7 +713,7 @@ async function changePassword(data) {
 
 /* ---------- Report and block ---------- */
 
-const findPerson = (id) => people.find((x) => x.id === id) || byId(id);
+const findPerson = (id) => people.find((x) => x.id === id) || byId(id) || (() => { const c = chats.find((x) => x.other_id === id); return c ? { id, name: c.other_name } : null; })();
 
 function hide(id) {
   hiddenIds.add(id);
@@ -521,7 +747,8 @@ async function sendReport(data) {
     const p = findPerson(reportId);
     const block = !!data.get("alsoblock");
     if (p && !p.sample) {
-      const r = await sb.from("reports").insert({ reporter_id: user.id, reported_id: p.id, reason: reason.toString(), details: (data.get("details") || "").toString().trim().slice(0, 500) });
+      const details = (data.get("details") || "").toString().trim().slice(0, 500);
+      const r = reportConv ? await sb.rpc("report_chat", { conv: reportConv, reason: reason.toString(), details }) : await sb.from("reports").insert({ reporter_id: user.id, reported_id: p.id, reason: reason.toString(), details });
       if (r.error) { fail("Could not send: " + r.error.message); return; }
       if (block) {
         const b = await sb.from("blocks").insert({ blocker_id: user.id, blocked_id: p.id, blocked_name: p.name });
@@ -531,6 +758,9 @@ async function sendReport(data) {
     }
     if (block && p) hide(p.id);
     reportId = null;
+    const wasChat = !!reportConv;
+    reportConv = null;
+    if (wasChat) { await loadChats(); if (block) view = "chats"; }
     notice = block ? "Thank you. We will review your report, and you will no longer see this profile." : "Thank you. We will review your report.";
     render();
   } finally { busy = false; }
@@ -611,7 +841,7 @@ async function processPhoto(file) {
 
 function render(keep) {
   if (!user && view !== "welcome" && view !== "auth" && !LEGALKEYS.includes(view)) view = "welcome";
-  if (user && !me && ["browse", "saved", "profile", "edit"].includes(view)) view = "create";
+  if (user && !me && ["browse", "saved", "plans", "chats", "chat", "profile", "edit"].includes(view)) view = "create";
   let html = "";
   if (view === "welcome") html = welcomeView();
   else if (LEGALKEYS.includes(view)) html = legalView(view);
@@ -619,11 +849,15 @@ function render(keep) {
   else if (view === "create" || view === "edit") html = formView();
   else if (view === "browse") html = browseView() + navView();
   else if (view === "saved") html = savedView() + navView();
+  else if (view === "plans") html = plansView() + navView();
+  else if (view === "chats") html = chatsView() + navView();
+  else if (view === "chat") html = chatView();
   else if (view === "profile") html = profileView() + navView();
-  app.innerHTML = html + unlockModal() + reportModal() + pwModal();
+  app.innerHTML = html + reportModal() + pwModal() + payModal() + sayHiModal();
   document.body.classList.toggle("landing", view === "welcome");
   if (view === "create") showStep(1);
-  if (!keep) window.scrollTo(0, 0);
+  if (view === "chat") window.scrollTo(0, document.body.scrollHeight);
+  if (!keep && view !== "chat") window.scrollTo(0, 0);
 }
 
 /* ---------- Actions ---------- */
@@ -650,7 +884,7 @@ const actions = {
     notice = error ? "Could not send the link: " + error.message : "If that email has an account, we have sent a link to reset the password.";
   },
   exportdata: () => {
-    const out = { email: user.email, nickname: me.name, gender: me.gender, interested_in: me.seeking, area: me.loc, bio: me.bio, interests: me.interests, contact_number: me.contact, photos: me.photos.length, photos_blurred: me.blur, profile_paused: !!me.paused, blocked_people: blockedList.map((b) => b.name), contacts_unlocked: unlockedIds.size, downloaded_at: new Date().toISOString() };
+    const out = { email: user.email, nickname: me.name, gender: me.gender, interested_in: me.seeking, area: me.loc, bio: me.bio, interests: me.interests, contact_number: me.contact, photos: me.photos.length, photos_blurred: me.blur, profile_paused: !!me.paused, blocked_people: blockedList.map((b) => b.name), contacts_viewed: viewedIds.size, downloaded_at: new Date().toISOString() };
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }));
     a.download = "my-egerton-connect-data.json";
@@ -658,7 +892,7 @@ const actions = {
     URL.revokeObjectURL(a.href);
   },
   report: (d) => { reportId = d.id; },
-  closereport: () => { reportId = null; },
+  closereport: () => { reportId = null; reportConv = null; },
   unblock: async (d) => {
     const { error } = await sb.from("blocks").delete().eq("blocker_id", user.id).eq("blocked_id", d.id);
     if (error) { notice = "Could not unblock: " + error.message; return; }
@@ -677,26 +911,52 @@ const actions = {
     if (error) { notice = "Could not update: " + error.message; return; }
     me.blur = !me.blur;
   },
-  unlock: (d) => { unlockId = d.id; },
-  closeunlock: () => { unlockId = null; },
-  confirmunlock: async () => {
-    const id = unlockId;
-    unlockId = null;
-    const real = people.find((x) => x.id === id);
+  sayhi: (d) => { sayHiId = d.id; },
+  closesayhi: () => { sayHiId = null; },
+  openchat: async (d) => { await openChat(d.cid || (chats.find((c) => c.other_id === d.id) || {}).id); },
+  accept: async () => {
+    const { error } = await sb.rpc("respond_chat", { conv: activeChat, approve: true });
+    if (error) { notice = chatError(error); return; }
+    await loadChats();
+    await loadMessages();
+  },
+  decline: async () => {
+    await sb.rpc("respond_chat", { conv: activeChat, approve: false });
+    await loadChats();
+    view = "chats";
+  },
+  blockchat: async () => {
+    const c = chats.find((x) => x.id === activeChat);
+    if (!c) return;
+    if (!confirm("Block " + c.other_name + "? You will not be able to see or message each other.")) return;
+    const b = await sb.from("blocks").insert({ blocker_id: user.id, blocked_id: c.other_id, blocked_name: c.other_name });
+    if (b.error && b.error.code !== "23505") { notice = "Could not block: " + b.error.message; return; }
+    if (!blockedList.some((x) => x.id === c.other_id)) blockedList.push({ id: c.other_id, name: c.other_name });
+    hide(c.other_id);
+    await loadChats();
+    view = "chats";
+  },
+  reportchat: () => { const c = chats.find((x) => x.id === activeChat); if (c) { reportId = c.other_id; reportConv = c.id; } },
+  reveal: async (d) => {
+    const real = people.find((x) => x.id === d.id);
+    if (!status.has_access) { view = "plans"; return; }
     if (!real) {
-      if (!sampleUnlocked.includes(id)) sampleUnlocked.push(id);
+      if (!sampleUnlocked.includes(d.id)) sampleUnlocked.push(d.id);
       try { localStorage.setItem(SKEY, JSON.stringify(sampleUnlocked)); } catch (e) { /* ignore */ }
       return;
     }
-    const { error } = await sb.rpc("unlock_for_testing", { target: id });
-    if (error) { notice = "Could not unlock: " + error.message; return; }
-    unlockedIds.add(id);
-    revealed[id] = await getContact(id);
+    const { data, error } = await sb.rpc("get_contact", { target: d.id });
+    if (error) { notice = error.message.includes("daily_limit") ? "You have reached today's limit of " + status.daily_view_limit + " numbers. Try again tomorrow." : "Could not show the number: " + error.message; return; }
+    if (!data) { notice = "This number is not available."; return; }
+    revealed[d.id] = data;
+    viewedIds.add(d.id);
     await signPeople([real]);
   },
+  choosepay: (d) => { payPlan = d.plan; payOpen = true; payError = ""; payWaiting = false; },
+  closepay: () => { payOpen = false; payWaiting = false; },
   logout: async () => {
     await sb.auth.signOut();
-    user = null; me = null; people = []; unlockedIds = new Set(); revealed = {}; hiddenIds = loadHidden(); blockedList = [];
+    user = null; me = null; people = []; viewedIds = new Set(); revealed = {}; hiddenIds = loadHidden(); blockedList = []; chats = []; if (channel) { sb.removeChannel(channel); channel = null; }
     view = "welcome";
   },
   delete: async () => {
@@ -705,7 +965,7 @@ const actions = {
     const { error } = await sb.rpc("delete_my_account");
     if (error) { notice = "Could not delete: " + error.message; return; }
     await sb.auth.signOut({ scope: "local" });
-    user = null; me = null; people = []; unlockedIds = new Set(); revealed = {}; hiddenIds = loadHidden(); blockedList = [];
+    user = null; me = null; people = []; viewedIds = new Set(); revealed = {}; hiddenIds = loadHidden(); blockedList = []; chats = []; if (channel) { sb.removeChannel(channel); channel = null; }
     view = "welcome";
   },
 };
@@ -750,6 +1010,18 @@ app.addEventListener("submit", async (e) => {
   if (form.dataset.form === "auth") { await doAuth(data); return; }
   if (form.dataset.form === "report") { await sendReport(data); return; }
   if (form.dataset.form === "password") { await changePassword(data); return; }
+  if (form.dataset.form === "pay") { await startPayment(data); return; }
+  if (form.dataset.form === "sayhi") { await sendSayHi(data); return; }
+  if (form.dataset.form === "chat") {
+    const text = (data.get("text") || "").toString().trim();
+    if (!text) return;
+    form.reset();
+    const { error } = await sb.rpc("send_message", { conv: activeChat, body: text });
+    if (error) { notice = chatError(error); render(true); return; }
+    await loadMessages();
+    updateMsgsDom();
+    return;
+  }
   const editing = view === "edit";
   if (!editing && step < STEPS) { stepNav("next"); return; }
   const err = validate(data, editing);
