@@ -244,29 +244,29 @@ function welcomeView() {
         <div class="hero-copy">
           <span class="pill reveal" style="--d:0s">For the whole Egerton community, 18+</span>
           <h1 class="reveal" style="--d:.1s">Real people. <em>Real connections.</em></h1>
-          <p class="lead reveal" style="--d:.2s">Join with just a nickname. Browse members around Egerton, and start a conversation when you are ready.</p>
+          <p class="lead reveal" style="--d:.2s">A respectful community for adults around Egerton to meet and connect. Join with a nickname, and share only what you choose.</p>
           <button class="btn sun big reveal" style="--d:.3s" data-act="start">Create my profile</button>
           <p class="fine reveal" style="--d:.4s">Free to join. Just 3 quick steps.</p>
         </div>
         <div class="hero-art reveal" style="--d:.35s" aria-hidden="true">
           ${mini("p1", "Now in Njoro town")}
           ${mini("p2", "Now at Egerton main campus")}
-          <div class="fc fc-match"><strong>Contact shown</strong></div>
+          <div class="fc fc-match"><strong>Say hi</strong></div>
           ${mini("p7", "Now in Nakuru town")}
         </div>
       </div>
     </section>
     <section class="trust"><div class="trust-in">
       <div><strong>Nicknames, not real names</strong><span>Profiles show a nickname and a general area.</span></div>
-      <div><strong>Private numbers</strong><span>Only shown to members with an active plan.</span></div>
+      <div><strong>You stay in control</strong><span>Blur your photos, pause your profile, or delete it whenever you like.</span></div>
       <div><strong>Adults only</strong><span>Everyone confirms they are 18 or older.</span></div>
     </div></section>
     <section class="how">
-      <h2>How it works</h2>
+      <h2>Join in three simple steps</h2>
       <div class="steps3">
-        <div class="how-card"><span class="num">1</span><h3>Create your profile</h3><p>Pick a nickname, your area and a few words about you.</p></div>
-        <div class="how-card"><span class="num">2</span><h3>Browse people</h3><p>See who is around Egerton and read their profiles.</p></div>
-        <div class="how-card"><span class="num">3</span><h3>Start talking</h3><p>Send a chat request. Once they accept, chat right here. A plan also shows contact numbers.</p></div>
+        <div class="how-card"><span class="num">1</span><h3>Create your account</h3><p>Sign up with your email and a password. It takes less than a minute.</p></div>
+        <div class="how-card"><span class="num">2</span><h3>Set up your profile</h3><p>Choose a nickname, your area and a few words about yourself.</p></div>
+        <div class="how-card"><span class="num">3</span><h3>Start connecting</h3><p>Browse members, say hi, and chat once they accept.</p></div>
       </div>
     </section>
     <section class="final">
@@ -305,7 +305,7 @@ function formView() {
   const locF = `<div class="field"><label for="location">Current area</label><select id="location" name="location"><option value="">Choose an area</option>${ZONES.map((z) => `<option ${m.loc === z ? "selected" : ""}>${z}</option>`).join("")}</select><div class="hint">A general area only, so nobody can find your exact spot.</div></div>`;
   const bioF = `<div class="field"><label for="bio">About me <span class="hint">(optional)</span></label><textarea id="bio" name="bio" maxlength="200" placeholder="A line or two about you">${esc(m.bio || "")}</textarea></div>`;
   const intF = `<div class="field"><label for="interests">Interests <span class="hint">(optional)</span></label><input id="interests" name="interests" type="text" placeholder="Football, Movies, Coding" value="${esc((m.interests || []).join(", "))}" /><div class="hint">Separate with commas. Up to 4.</div></div>`;
-  const contactF = `<div class="field"><label for="contact">Phone or WhatsApp number</label><input id="contact" name="contact" type="tel" maxlength="20" placeholder="07XX XXX XXX" value="${esc(m.contact || "")}" /><div class="hint">Only shown to members with an active plan.</div></div>`;
+  const contactF = `<div class="field"><label for="contact">Phone or WhatsApp number</label><input id="contact" name="contact" type="tel" maxlength="20" placeholder="07XX XXX XXX" value="${esc(m.contact || "")}" /><div class="hint">Hidden by default. Other members must tap to view it.</div></div>`;
   const consentF = `<label class="check"><input type="checkbox" name="consent" /> <span>I am 18 or older, I agree to the <a href="#terms" target="_blank" rel="noopener">Terms</a> and <a href="#privacy" target="_blank" rel="noopener">Privacy Policy</a>, and I will treat people with respect.</span></label>`;
   const photoF = `<div class="field"><label for="photos">Photos <span class="hint">(optional, up to 3)</span></label><input id="photos" type="file" accept="image/*" multiple /><div class="thumbs" id="thumbs">${thumbsHtml()}</div><div class="hint">A blurred copy is made for you automatically.</div></div>`;
   const blurF = `<label class="check"><input type="checkbox" name="blur" ${m.blur ? "checked" : ""} /> <span>Blur my photos until a member views my contact number.</span></label>`;
@@ -364,7 +364,7 @@ function appHead() {
   const tab = (to, label, extra) => `<button data-act="nav" data-to="${to}" ${view === to ? 'aria-current="page"' : ""}>${label}${extra || ""}</button>`;
   const badge = `<span class="badge chatbadge" ${n ? "" : "hidden"}>${n}</span>`;
   return `<header class="app-head"><button class="brandbtn" data-act="nav" data-to="welcome" aria-label="Back to the home page">Egerton Connect</button>
-    <nav class="topnav" aria-label="Main">${tab("browse", "Browse")}${tab("saved", "Saved")}${tab("chats", "Chats", badge)}${tab("plans", "Plans")}${tab("profile", "My profile")}</nav>
+    <nav class="topnav" aria-label="Main">${tab("browse", "Browse")}${tab("saved", "Saved")}${tab("chats", "Chats", badge)}${status.payments_enabled ? tab("plans", "Plans") : ""}${tab("profile", "My profile")}</nav>
     <button class="me-chip" data-act="nav" data-to="profile" aria-label="My profile">${avatar(me, "sm")}</button></header>`;
 }
 
@@ -421,7 +421,7 @@ function browseView() {
       <div class="fchips" role="group" aria-label="Filter by area">${achips}</div>
     </section>
     ${me.paused ? `<div class="notice paused"><span>Your profile is paused, so nobody can see it.</span><button class="btn sun small" data-act="togglepause">Show it again</button></div>` : ""}
-    ${!status.payments_enabled ? `<p class="notice freebar">Free preview: contact numbers are open to all members while we test. Paid plans start later.</p>` : status.has_access ? "" : `<div class="notice paused"><span>Get a plan to see contact numbers.</span><button class="btn sun small" data-act="nav" data-to="plans">See plans</button></div>`}
+    ${!status.payments_enabled ? "" : status.has_access ? "" : `<div class="notice paused"><span>Get a plan to see contact numbers.</span><button class="btn sun small" data-act="nav" data-to="plans">See plans</button></div>`}
     ${welcome}${noticeHtml()}${completeCard()}
     <section class="interests"><h3>Browse by interest</h3><div class="fchips" role="group" aria-label="Filter by interest">${ichips}</div></section>
     ${!people.length ? `<p class="hint pad">Early preview: these are sample profiles until more people join.</p>` : ""}
@@ -450,11 +450,11 @@ function profileView() {
       </dl>
       ${me.bio ? `<p>${esc(me.bio)}</p>` : ""}
       <div class="tags">${me.interests.map((i) => `<span>${esc(i)}</span>`).join("")}</div>
-      <p class="hint" style="margin-top:14px">Your number (${esc(me.contact)}) is only shown to members with an active plan.</p>
+      <p class="hint" style="margin-top:14px">Your number (${esc(me.contact)}) is hidden by default, and other members must tap to view it.</p>
     </div></div>
     ${me.photos.length ? `<div class="box"><h3>Photo privacy</h3><p class="hint">${me.blur ? "Your photos are blurred. Others see them blurred until they view your contact number." : "Your photos are visible to everyone browsing."}</p><button class="btn ${me.blur ? "sun" : "ghost"}" data-act="toggleblur">${me.blur ? "Show my photos" : "Blur my photos"}</button></div>` : ""}
     <button class="btn" data-act="edit">Edit profile</button>
-    <div class="box"><h3>Membership</h3><p class="hint">${!status.payments_enabled ? "Free during testing." : status.has_access && status.access_until ? "Active until " + fmtDate(status.access_until) + "." : "No active plan."}</p><button class="btn ghost" data-act="nav" data-to="plans">See plans</button></div>
+    ${status.payments_enabled ? `<div class="box"><h3>Membership</h3><p class="hint">${status.has_access && status.access_until ? "Active until " + fmtDate(status.access_until) + "." : "No active plan."}</p><button class="btn ghost" data-act="nav" data-to="plans">See plans</button></div>` : ""}
     <div class="box"><h3>Profile visibility</h3><p class="hint">${me.paused ? "Your profile is paused. Nobody can see it or your contact number." : "Your profile is visible to other members."}</p><button class="btn ${me.paused ? "sun" : "ghost"}" data-act="togglepause">${me.paused ? "Show my profile again" : "Pause my profile"}</button></div>
     <div class="box"><h3>Account</h3><p class="hint">Signed in as ${esc(user.email)}. Only you can see this.</p><div class="acct"><button class="btn ghost" data-act="changepw">Change password</button><button class="btn ghost" data-act="exportdata">Download my data</button></div></div>
     ${blockedList.length ? `<div class="box"><h3>Blocked people</h3>${blockedList.map((b) => `<div class="blk"><span>${esc(b.name)}</span><button class="btn small ghost" data-act="unblock" data-id="${esc(b.id)}">Unblock</button></div>`).join("")}</div>` : ""}
