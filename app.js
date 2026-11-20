@@ -243,8 +243,8 @@ function welcomeView() {
       <div class="hero-in">
         <div class="hero-copy">
           <span class="pill reveal" style="--d:0s">For the whole Egerton community, 18+</span>
-          <h1 class="reveal" style="--d:.1s">Meet someone nearby, <em>privately.</em></h1>
-          <p class="lead reveal" style="--d:.2s">Join with just a nickname. Browse people around Egerton. Numbers are only shown to members with a plan.</p>
+          <h1 class="reveal" style="--d:.1s">Real people. <em>Real connections.</em></h1>
+          <p class="lead reveal" style="--d:.2s">Join with just a nickname. Browse members around Egerton, and start a conversation when you are ready.</p>
           <button class="btn sun big reveal" style="--d:.3s" data-act="start">Create my profile</button>
           <p class="fine reveal" style="--d:.4s">Free to join. Just 3 quick steps.</p>
         </div>
@@ -322,7 +322,7 @@ function formView() {
   <form class="form" data-form="profile" novalidate>${errBox}
     <section class="step" data-step="1"><h3 class="step-title">First, the basics</h3>${nameF}${genderF}${seekF}</section>
     <section class="step" data-step="2" hidden><h3 class="step-title">About you</h3>${locF}${bioF}${intF}</section>
-    <section class="step" data-step="3" hidden><h3 class="step-title">Photos and contact</h3>${photoF}${blurF}${contactF}${consentF}</section>
+    <section class="step" data-step="3" hidden><h3 class="step-title">Last step</h3>${contactF}${consentF}</section>
     <div class="step-nav">
       <button class="btn ghost" type="button" data-act="prev">Back</button>
       <button class="btn" type="button" id="nextBtn" data-act="next">Next</button>
@@ -410,7 +410,7 @@ function browseView() {
   const achips = ["all"].concat(ZONES).map((z) => `<button class="fchip" data-act="area" data-z="${esc(z)}" aria-pressed="${areaFilter === z}">${z === "all" ? "Everyone" : esc(z)}</button>`).join("");
   const ichips = ["all"].concat(top).map((x) => `<button class="fchip alt" data-act="interest" data-i="${esc(x)}" aria-pressed="${interestFilter === x}">${x === "all" ? "All interests" : esc(x)}</button>`).join("");
   const welcome = justJoined
-    ? `<div class="welcome-card"><div class="confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><h3>You're in, ${esc(me.name)}!</h3><p>Your profile is live. Have a look around, and view a contact number when you find someone you like.</p><button class="btn sun small" data-act="closewelcome">Got it</button></div>`
+    ? `<div class="welcome-card"><div class="confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><h3>You're in, ${esc(me.name)}!</h3><p>Your profile is live. Have a look around, and add photos any time from My profile.</p><button class="btn sun small" data-act="closewelcome">Got it</button></div>`
     : "";
   return `${appHead()}
     <section class="b-hero">
