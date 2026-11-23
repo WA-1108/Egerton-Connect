@@ -326,7 +326,7 @@ function formView() {
     <div class="step-nav">
       <button class="btn ghost" type="button" data-act="prev">Back</button>
       <button class="btn" type="button" id="nextBtn" data-act="next">Next</button>
-      <button class="btn sun" type="submit" id="doneBtn" hidden>Publish my profile</button>
+      <button class="btn sun" type="submit" id="doneBtn" hidden>Complete Sign Up</button>
     </div>
   </form>`;
 }
